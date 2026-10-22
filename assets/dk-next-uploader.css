@@ -1,0 +1,24 @@
+/* DoKitly next build: upload-first mobile layout and truthful preview states. */
+#toolRoot .editor-layout.dk-next-upload-first{display:grid;align-items:start;}
+#toolRoot .editor-layout.dk-next-upload-first .editor-controls{order:0;min-width:0;}
+#toolRoot .editor-layout.dk-next-upload-first .editor-preview{order:1;min-width:0;}
+#toolRoot .editor-preview[hidden],#toolRoot [hidden]{display:none!important;}
+#toolRoot .global-upload-row{position:relative;z-index:2;}
+#toolRoot .global-upload-row .file-pick-btn{display:inline-flex!important;align-items:center;justify-content:center;min-height:44px;cursor:pointer;}
+@media(max-width:900px){
+#toolRoot .editor-layout.dk-next-upload-first{display:flex!important;flex-direction:column!important;gap:14px!important;}
+#toolRoot .editor-layout.dk-next-upload-first .editor-controls{order:0!important;width:100%!important;}
+#toolRoot .editor-layout.dk-next-upload-first .editor-preview{order:1!important;width:100%!important;position:static!important;}
+#toolRoot .global-upload-row{display:grid!important;grid-template-columns:minmax(0,1fr) auto!important;align-items:center!important;gap:10px!important;min-height:78px!important;padding:14px!important;}
+#toolRoot .global-upload-row .upload-thumb{grid-column:1/-1;max-width:100%!important;}
+#toolRoot .global-upload-row .file-pick-btn{padding:12px 18px!important;font-size:14px!important;}
+#toolRoot .global-upload-row .upload-name{min-width:0;overflow-wrap:anywhere;}
+}
+@media(max-width:390px){#toolRoot .global-upload-row{grid-template-columns:1fr!important}#toolRoot .global-upload-row .file-pick-btn{width:100%!important}}
+
+/* Shared PDF organizer/upload panes: keep Choose File first on phones. */
+#toolRoot .editor-layout .editor-controls{order:0!important;}
+#toolRoot .editor-layout .editor-preview{order:1!important;}
+#toolRoot .editor-layout .editor-preview[hidden]{display:none!important;}
+#toolRoot .pdf-upload-row .file-pick-btn{display:inline-flex!important;min-height:44px;align-items:center;justify-content:center;cursor:pointer;}
+@media(max-width:900px){#toolRoot .editor-layout{display:flex!important;flex-direction:column!important;gap:14px!important}#toolRoot .editor-layout .editor-controls,#toolRoot .editor-layout .editor-preview{width:100%!important;position:static!important}#toolRoot .pdf-upload-row{max-width:100%;min-height:68px!important}#toolRoot .pdf-upload-row .file-pick-btn{padding:11px 18px!important}}

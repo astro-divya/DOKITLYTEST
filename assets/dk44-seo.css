@@ -18,3 +18,14 @@ html[data-theme="dark"] .dk44-seo,body.dark .dk44-seo,body[data-theme="dark"] .d
 
 /* Workflow chart used by non-comparative tools: three conceptual stages. */
 .dk44-seo .chartprogress{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin:19px 0 23px}.dk44-seo .chartprogress span{height:15px;border-radius:6px;background:linear-gradient(90deg,var(--dk44-blue),var(--dk44-teal));transform-origin:left;transform:scaleX(.08);transition:transform .65s ease}.dk44-seo .chart.dk44-visible .chartprogress span{transform:scaleX(1)}.dk44-seo .chartprogress span:nth-child(2){transition-delay:.17s;opacity:.85}.dk44-seo .chartprogress span:nth-child(3){transition-delay:.34s;opacity:.7}.dk44-seo .mini-chart-row{display:flex;gap:12px;align-items:start;padding:12px 0;border-top:1px solid var(--dk44-line);font-size:13px;line-height:1.5;color:var(--dk44-slate)}.dk44-seo .mini-chart-row b{font-variant-numeric:tabular-nums;color:var(--dk44-blue);font-size:15px}@media(prefers-reduced-motion:reduce){.dk44-seo .chartprogress span{transform:none}}
+
+/* Next build: intentional large right-center editorial illustration. */
+.dk44-seo{display:grid;grid-template-columns:minmax(0,1fr) clamp(265px,33vw,385px);column-gap:22px;align-items:center}
+.dk44-seo>.dk44-lead{grid-column:1;grid-row:1;min-width:0;max-width:none}
+.dk44-seo>.dk44-illustration{grid-column:2;grid-row:1;display:block;width:100%;height:auto;max-width:385px!important;max-height:285px!important;margin:0 auto!important;object-fit:contain;animation:dk-next-float 4.6s ease-in-out infinite,dk-next-enter .75s ease-out both!important;filter:drop-shadow(0 15px 22px rgba(28,64,101,.08));}
+.dk44-seo>:not(.dk44-lead):not(.dk44-illustration){grid-column:1/-1}
+@keyframes dk-next-float{0%,100%{transform:translate3d(0,0,0)}50%{transform:translate3d(0,-15px,0)}}
+@keyframes dk-next-enter{from{opacity:0;scale:.92}to{opacity:1;scale:1}}
+.dk44-seo .dk44-reveal{will-change:opacity,transform;}
+@media(max-width:800px){.dk44-seo{display:block}.dk44-seo>.dk44-illustration{width:min(100%,290px)!important;max-width:290px!important;max-height:220px!important;margin:16px auto 0!important}.dk44-seo .dk44-lead h2{max-width:100%}}
+@media(prefers-reduced-motion:reduce){.dk44-seo>.dk44-illustration{animation:none!important;filter:none}.dk44-seo .dk44-reveal{opacity:1!important;transform:none!important;transition:none!important}}

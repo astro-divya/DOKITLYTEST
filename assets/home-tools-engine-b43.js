@@ -470,37 +470,159 @@ function bindBuild2Workspace(id){
   const safeName=()=>`DoKitly_Smart_Quiz_${new Date().toISOString().slice(0,10)}`;
   function setExportStatus(msg){if(status)status.textContent=msg}
   function exportData(){if(!lastQuiz.length)throw Error('Generate a quiz before exporting.');return {title:'DoKitly Smart Quiz — Practice Worksheet',questions:lastQuiz,answers:Boolean($('quizExportAnswers')?.checked)};}
-  function downloadBlob(blob,name){const u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1500)}
+  // Both exports use one predictable, user-initiated download path (including iframe embeds).
+  function downloadBlob(blob,name){
+    if(!blob || !blob.size)throw Error('Export produced an empty file.');
+    const url=URL.createObjectURL(blob),link=document.createElement('a');
+    link.href=url;link.download=name;link.rel='noopener';
+    document.body.appendChild(link);link.click();link.remove();
+    // Keep the blob URL alive long enough for slower/mobile download handlers.
+    setTimeout(()=>URL.revokeObjectURL(url),60000);
+  }
   const scripts={pdf:'assets/vendor/jspdf-2.5.1.umd.min.js',docx:'assets/vendor/docx-8.5.0.umd.js'};
-  async function loadLocalLibrary(type){const check=()=>type==='pdf'?window.jspdf?.jsPDF:window.docx?.Packer;
+  async function loadLocalLibrary(type){
+    const check=()=>type==='pdf'?window.jspdf?.jsPDF:window.docx?.Packer;
     if(check())return;
     const url=new URL(scripts[type],document.baseURI).href;
-    await new Promise((resolve,reject)=>{const el=document.createElement('script');el.src=url;el.async=true;el.onload=resolve;el.onerror=()=>reject(Error('Could not load the local '+type.toUpperCase()+' export library.'));document.head.appendChild(el)});
+    await new Promise((resolve,reject)=>{
+      const el=document.createElement('script');el.src=url;el.async=true;
+      el.onload=resolve;el.onerror=()=>reject(Error('Could not load the local '+type.toUpperCase()+' export library.'));
+      document.head.appendChild(el);
+    });
     if(!check())throw Error(type.toUpperCase()+' export library did not initialize.');
   }
-  async function savePdf(){const d=exportData();await loadLocalLibrary('pdf');const pdf=new window.jspdf.jsPDF({unit:'pt',format:'a4',compress:true});
-    const lineHeight=17,pad=48,pageW=595.28,pageH=841.89,width=pageW-pad*2;let y=pad;
-    // Unicode input is rendered onto canvas pages to avoid jsPDF's basic Latin-only font limitation.
-    const ascii=s=>s.replace(/[—–]/g,'-').replace(/[‘’]/g,"'").replace(/[“”]/g,'\"').replace(/[×]/g,'x');
-    const all=[d.title,...d.questions.map((q,i)=>`${i+1}. ${q.q}`),...(d.answers?['Answer key',...d.questions.map((q,i)=>`${i+1}. ${q.a}`)]:[])].map(ascii);
-    if(all.some(x=>/[^\x00-\x7f]/.test(x))){
-      const scale=2,can=document.createElement('canvas');can.width=1240;can.height=1754;const ctx=can.getContext('2d');if(!ctx)throw Error('Canvas unavailable for multilingual PDF');
-      const pX=94,maxX=can.width-188,lh=36;let cy=98,first=true;
-      function fresh(){ctx.fillStyle='#fff';ctx.fillRect(0,0,can.width,can.height);ctx.fillStyle='#172b48';ctx.font='24px Arial, sans-serif';cy=98}
-      function finish(){pdf.addImage(can.toDataURL('image/jpeg',.88),'JPEG',0,0,pageW,pageH)}
-      fresh();for(let i=0;i<all.length;i++){const txt=all[i];const font=i===0?'bold 37px Arial, sans-serif':(txt==='Answer key'?'bold 31px Arial, sans-serif':'24px Arial, sans-serif');ctx.font=font;const parts=txt.split(/\s+/),lines=[];let row='';for(const w of parts){const candidate=row?row+' '+w:w;if(ctx.measureText(candidate).width>maxX && row){lines.push(row);row=w}else row=candidate;}if(row)lines.push(row);if(!lines.length)lines.push(' ');
-        for(const line of lines){if(cy+lh>can.height-95){finish();pdf.addPage();fresh();ctx.font=font}ctx.fillText(line,pX,cy);cy+=lh}cy+=i===0?26:15;
-      }finish();
-    }else{
-      const line=(str,size=12,bold=false)=>{pdf.setFont('helvetica',bold?'bold':'normal');pdf.setFontSize(size);const lines=pdf.splitTextToSize(str,width);for(const t of lines){if(y>pageH-pad){pdf.addPage();y=pad}pdf.text(t,pad,y);y+=size*1.5}y+=7};
-      line(d.title,18,true);d.questions.forEach((q,i)=>line(`${i+1}. ${q.q}`,12));if(d.answers){y+=14;line('Answer key',15,true);d.questions.forEach((q,i)=>line(`${i+1}. ${q.a}`,11));}
+  async function savePdf(){
+    const d=exportData();await loadLocalLibrary('pdf');
+    const pdf=new window.jspdf.jsPDF({unit:'pt',format:'a4',compress:true});
+    const pageW=pdf.internal.pageSize.getWidth(),pageH=pdf.internal.pageSize.getHeight();
+    const pad=48,top=125,bottom=pageH-92,width=pageW-2*pad;
+    let y=top;
+    const plain=s=>String(s).replace(/[—–]/g,'-').replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/[×]/g,'x');
+    function paintThemePage(){
+      pdf.setFillColor(244,250,251);pdf.rect(0,0,pageW,pageH,'F');
+      pdf.setFillColor(233,246,247);pdf.circle(pageW-88,82,88,'F');
+      pdf.setFillColor(229,240,248);pdf.circle(92,pageH-78,76,'F');
+      pdf.setFillColor(252,254,255);pdf.roundedRect(pad-10,100,pageW-2*(pad-10),pageH-188,16,16,'F');
+      pdf.setDrawColor(222,235,239);pdf.setLineWidth(.8);pdf.roundedRect(pad-10,100,pageW-2*(pad-10),pageH-188,16,16,'S');
+      pdf.setFont('helvetica','bold');pdf.setFontSize(54);pdf.setTextColor(233,242,244);
+      pdf.text('DoKitly',pageW/2,pageH/2-8,{align:'center',angle:33});
+      pdf.setFont('helvetica','normal');pdf.setFontSize(18);pdf.setTextColor(227,238,241);
+      pdf.text('dokitly.in',pageW/2,pageH/2+30,{align:'center',angle:33});
     }
-    pdf.save(safeName()+'.pdf');
+    paintThemePage();
+    const blocks=[{type:'title',text:'Smart Quiz - Practice Worksheet'},
+      ...d.questions.map((q,i)=>({type:'question',text:`${i+1}. ${q.q}`}))];
+    if(d.answers){blocks.push({type:'answers',text:'Answer key'});
+      d.questions.forEach((q,i)=>blocks.push({type:'answer',text:`${i+1}. ${q.a}`}));}
+    const hasUnicode=blocks.some(b=>/[^ -]/.test(plain(b.text)));
+    if(hasUnicode){
+      const canvas=document.createElement('canvas');canvas.width=1240;canvas.height=1754;
+      const ctx=canvas.getContext('2d');if(!ctx)throw Error('Canvas unavailable for multilingual PDF.');
+      const ratio=canvas.width/pageW,pX=pad*ratio,maxWidth=(pageW-2*pad)*ratio;
+      const bodyTop=top*ratio,bodyBottom=bottom*ratio;
+      let cy=bodyTop;
+      function fresh(){
+        ctx.fillStyle='#F4FAFB';ctx.fillRect(0,0,canvas.width,canvas.height);
+        ctx.fillStyle='#E9F6F7';ctx.beginPath();ctx.arc(canvas.width-170,150,170,0,Math.PI*2);ctx.fill();
+        ctx.fillStyle='#E5F0F8';ctx.beginPath();ctx.arc(150,canvas.height-120,145,0,Math.PI*2);ctx.fill();
+        ctx.fillStyle='#FCFEFF';roundRect(ctx,(pad-10)*ratio,100*ratio,(pageW-2*(pad-10))*ratio,(pageH-188)*ratio,16*ratio);ctx.fill();
+        ctx.strokeStyle='#DEEDEF';ctx.lineWidth=2;roundRect(ctx,(pad-10)*ratio,100*ratio,(pageW-2*(pad-10))*ratio,(pageH-188)*ratio,16*ratio);ctx.stroke();
+        ctx.save();ctx.translate(canvas.width/2,canvas.height/2);ctx.rotate(33*Math.PI/180);ctx.textAlign='center';
+        ctx.fillStyle='#E9F2F4';ctx.font='bold 96px Arial, sans-serif';ctx.fillText('DoKitly',0,-6);
+        ctx.fillStyle='#E3EEF1';ctx.font='28px Arial, sans-serif';ctx.fillText('dokitly.in',0,44);ctx.restore();
+        ctx.fillStyle='#172b48';cy=bodyTop;
+      }
+      function roundRect(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath();}
+      function flush(){pdf.addImage(canvas.toDataURL('image/jpeg',.91),'JPEG',0,0,pageW,pageH);}
+      fresh();
+      for(const block of blocks){
+        if(block.type==='answers'&&cy>bodyTop+40){flush();pdf.addPage();paintThemePage();fresh();}
+        const size=block.type==='title'?37:block.type==='answers'?31:24;
+        ctx.font=(block.type==='title'||block.type==='answers'?'bold ':'')+size+'px Arial, sans-serif';
+        const font=ctx.font,lh=36,words=plain(block.text).split(/\s+/),rows=[];
+        let row='';for(const word of words){const next=row?row+' '+word:word;
+          if(ctx.measureText(next).width>maxWidth&&row){rows.push(row);row=word}else row=next;}
+        if(row)rows.push(row);
+        for(const textLine of rows.length?rows:[' ']){
+          if(cy+lh>bodyBottom){flush();pdf.addPage();paintThemePage();fresh();ctx.font=font;}
+          ctx.fillStyle='#172B48';ctx.fillText(textLine,pX,cy);cy+=lh;
+        }
+        cy+=block.type==='title'?30:16;
+      }
+      flush();
+    }else{
+      function write(str,size=12,bold=false,extra=9,color=[23,43,72]){
+        pdf.setFont('helvetica',bold?'bold':'normal');pdf.setFontSize(size);pdf.setTextColor(...color);
+        const lines=pdf.splitTextToSize(plain(str),width);
+        for(const item of lines){const height=size*1.5;
+          if(y+height>bottom){pdf.addPage();paintThemePage();y=top;}
+          pdf.text(item,pad,y);y+=height;}
+        y+=extra;
+      }
+      for(const b of blocks){
+        if(b.type==='answers'&&y>top+20){pdf.addPage();paintThemePage();y=top;}
+        if(b.type==='title')write(b.text,18,true,20,[13,61,115]);
+        else if(b.type==='answers')write(b.text,16,true,17,[7,117,122]);
+        else write(b.text,b.type==='answer'?11:12,false,b.type==='answer'?7:12,[23,43,72]);
+      }
+    }
+    const pages=pdf.getNumberOfPages();
+    for(let num=1;num<=pages;num++){
+      pdf.setPage(num);
+      pdf.setFillColor(247,252,252);pdf.roundedRect(16,16,pageW-32,74,14,14,'F');
+      pdf.setDrawColor(220,234,237);pdf.setLineWidth(.8);pdf.roundedRect(16,16,pageW-32,74,14,14,'S');
+      pdf.setFont('helvetica','bold');pdf.setFontSize(19);pdf.setTextColor(13,61,115);pdf.text('Do',pad,42);
+      pdf.setTextColor(7,155,153);pdf.text('Kitly',pad+25,42);
+      pdf.setFont('helvetica','normal');pdf.setFontSize(9);pdf.setTextColor(80,98,118);
+      pdf.text('dokitly.in  |  Free Browser Tools',pageW-pad,41,{align:'right'});
+      pdf.setFont('helvetica','bold');pdf.setFontSize(8.5);pdf.setTextColor(65,85,112);
+      pdf.text('SMART QUIZ GENERATOR  /  PRACTICE WORKSHEET',pad,72);
+      pdf.setDrawColor(18,176,172);pdf.setLineWidth(1.15);pdf.line(pad,84,pageW-pad,84);
+      pdf.setFillColor(247,252,252);pdf.roundedRect(16,pageH-66,pageW-32,42,12,12,'F');
+      pdf.setDrawColor(220,234,237);pdf.setLineWidth(.7);pdf.roundedRect(16,pageH-66,pageW-32,42,12,12,'S');
+      pdf.setFont('helvetica','normal');pdf.setFontSize(8.5);pdf.setTextColor(92,108,126);
+      pdf.text('Created with DoKitly  |  dokitly.in',pad,pageH-40);
+      pdf.text(`Page ${num} / ${pages}`,pageW-pad,pageH-40,{align:'right'});
+      pdf.link(pad,pageH-58,215,22,{url:'https://dokitly.in/'});
+    }
+    pdf.setProperties({title:'DoKitly Smart Quiz - Practice Worksheet',subject:'Practice questions',author:'DoKitly',creator:'DoKitly Smart Quiz Generator'});
+    downloadBlob(pdf.output('blob'),safeName()+'.pdf');
   }
-  async function saveDocx(){const d=exportData();await loadLocalLibrary('docx');const L=window.docx;const ps=[new L.Paragraph({text:d.title,heading:L.HeadingLevel.HEADING_1})];
-    d.questions.forEach((q,i)=>{ps.push(new L.Paragraph({text:`${i+1}. ${q.q}`,spacing:{before:170,after:100}}));ps.push(new L.Paragraph({text:'Answer: _____________________________________'}))});
-    if(d.answers){ps.push(new L.Paragraph({text:'Answer key',heading:L.HeadingLevel.HEADING_2,pageBreakBefore:true}));d.questions.forEach((q,i)=>ps.push(new L.Paragraph({text:`${i+1}. ${q.a}`,spacing:{after:110}})))}
-    const doc=new L.Document({sections:[{properties:{},children:ps}]});const blob=await L.Packer.toBlob(doc);downloadBlob(blob,safeName()+'.docx');
+  async function saveDocx(){
+    const d=exportData();await loadLocalLibrary('docx');const L=window.docx;
+    const logoRuns=[new L.TextRun({text:'Do',bold:true,color:'0D3D73',size:29}),
+      new L.TextRun({text:'Kitly',bold:true,color:'079B99',size:29}),
+      new L.TextRun({text:'    dokitly.in  |  Free Browser Tools',color:'51677D',size:18})];
+    const header=new L.Header({children:[
+      new L.Paragraph({alignment:L.AlignmentType.CENTER,spacing:{after:40},children:[new L.TextRun({text:'DOKITLY',bold:true,color:'E2EFF1',size:64})]}),
+      new L.Paragraph({children:logoRuns,spacing:{after:70},border:{bottom:{style:L.BorderStyle.SINGLE,size:7,color:'12B0AC',space:6}},shading:{fill:'F2FBFB'}}),
+      new L.Paragraph({children:[new L.TextRun({text:'SMART QUIZ GENERATOR  /  PRACTICE WORKSHEET',bold:true,color:'405570',size:15})],spacing:{after:20}})
+    ]});
+    const footer=new L.Footer({children:[new L.Paragraph({
+      children:[new L.TextRun({text:'Created with DoKitly  |  dokitly.in',color:'5C6C7E',size:16}),
+        new L.TextRun({text:'     Page ',color:'5C6C7E',size:16}),
+        new L.TextRun({children:[L.PageNumber.CURRENT],color:'5C6C7E',size:16})],
+      border:{top:{style:L.BorderStyle.SINGLE,size:5,color:'D9E3EF',space:6}},shading:{fill:'F7FCFC'}
+    })]});
+    const ps=[
+      new L.Paragraph({alignment:L.AlignmentType.CENTER,spacing:{after:40},children:[new L.TextRun({text:'DoKitly',bold:true,color:'E6F2F4',size:52})]}),
+      new L.Paragraph({children:[new L.TextRun({text:'Smart Quiz - Practice Worksheet',bold:true,color:'0D3D73',size:28})],spacing:{after:260},shading:{fill:'ECF7F8'}})
+    ];
+    d.questions.forEach((q,i)=>{
+      ps.push(new L.Paragraph({text:`${i+1}. ${q.q}`,spacing:{before:170,after:100},shading:{fill:i%2===0?'F9FCFD':'F3FAFB'}}));
+      ps.push(new L.Paragraph({text:'Answer: _____________________________________',spacing:{after:120},color:'53697E'}));
+    });
+    if(d.answers){
+      ps.push(new L.Paragraph({text:'Answer key',heading:L.HeadingLevel.HEADING_2,pageBreakBefore:true,spacing:{after:180},shading:{fill:'ECF7F8'}}));
+      d.questions.forEach((q,i)=>ps.push(new L.Paragraph({text:`${i+1}. ${q.a}`,spacing:{after:130},shading:{fill:i%2===0?'F9FCFD':'F3FAFB'}})));
+    }
+    const doc=new L.Document({
+      creator:'DoKitly',
+      description:'DoKitly Smart Quiz practice worksheet export',
+      background:{color:'F4FAFB'},
+      sections:[{properties:{page:{margin:{top:1550,bottom:940,left:850,right:850,header:680,footer:430}}},headers:{default:header},footers:{default:footer},children:ps}]
+    });
+    const blob=await L.Packer.toBlob(doc);downloadBlob(blob,safeName()+'.docx');
   }
   function wireExport(button,fn,type){button.onclick=async()=>{if(!lastQuiz.length)return;pdfBtn.disabled=docxBtn.disabled=true;setExportStatus('Preparing your '+type+' locally…');try{await fn();setExportStatus('Your '+type+' download was generated in this browser.')}catch(e){setExportStatus('Export failed: '+(e?.message||e))}finally{pdfBtn.disabled=docxBtn.disabled=false}}}
   wireExport(pdfBtn,savePdf,'PDF');wireExport(docxBtn,saveDocx,'Word');
