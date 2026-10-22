@@ -491,6 +491,19 @@ function bindBuild2Workspace(id){
     });
     if(!check())throw Error(type.toUpperCase()+' export library did not initialize.');
   }
+  // The same full-page DoKitly artwork is embedded behind text in both formats.
+  function makeDoKitlyWatermark(){
+    const canvas=document.createElement('canvas');canvas.width=1000;canvas.height=1414;
+    const c=canvas.getContext('2d');if(!c)throw Error('Watermark rendering is unavailable.');
+    c.save();c.translate(500,707);c.rotate(-Math.PI/4);
+    const ink=c.createLinearGradient(-680,0,680,0);ink.addColorStop(0,'#164677');ink.addColorStop(.52,'#088e98');ink.addColorStop(1,'#3b74a9');
+    c.fillStyle=ink;c.globalAlpha=.135;c.textAlign='center';c.textBaseline='middle';
+    c.font='900 244px Arial, sans-serif';const width=c.measureText('DoKitly').width;
+    c.save();c.scale(940/Math.max(1,width),1);c.fillText('DoKitly',0,0);c.restore();
+    c.globalAlpha=.12;c.font='bold 45px Arial, sans-serif';c.fillText('dokitly.in   •   FREE BROWSER TOOLS',0,148);
+    c.globalAlpha=.08;c.fillStyle='#137c9c';c.fillRect(-620,-165,1240,5);c.fillRect(-620,230,1240,4);
+    c.restore();return canvas;
+  }
   async function savePdf(){
     const d=exportData();await loadLocalLibrary('pdf');
     const pdf=new window.jspdf.jsPDF({unit:'pt',format:'a4',compress:true});
@@ -504,11 +517,9 @@ function bindBuild2Workspace(id){
       pdf.setFillColor(229,240,248);pdf.circle(92,pageH-78,76,'F');
       pdf.setFillColor(252,254,255);pdf.roundedRect(pad-10,100,pageW-2*(pad-10),pageH-188,16,16,'F');
       pdf.setDrawColor(222,235,239);pdf.setLineWidth(.8);pdf.roundedRect(pad-10,100,pageW-2*(pad-10),pageH-188,16,16,'S');
-      pdf.setFont('helvetica','bold');pdf.setFontSize(54);pdf.setTextColor(233,242,244);
-      pdf.text('DoKitly',pageW/2,pageH/2-8,{align:'center',angle:33});
-      pdf.setFont('helvetica','normal');pdf.setFontSize(18);pdf.setTextColor(227,238,241);
-      pdf.text('dokitly.in',pageW/2,pageH/2+30,{align:'center',angle:33});
+      pdf.addImage(wmCanvas.toDataURL('image/png'),'PNG',0,0,pageW,pageH,undefined,'FAST');
     }
+    const wmCanvas=makeDoKitlyWatermark();
     paintThemePage();
     const blocks=[{type:'title',text:'Smart Quiz - Practice Worksheet'},
       ...d.questions.map((q,i)=>({type:'question',text:`${i+1}. ${q.q}`}))];
@@ -527,9 +538,7 @@ function bindBuild2Workspace(id){
         ctx.fillStyle='#E5F0F8';ctx.beginPath();ctx.arc(150,canvas.height-120,145,0,Math.PI*2);ctx.fill();
         ctx.fillStyle='#FCFEFF';roundRect(ctx,(pad-10)*ratio,100*ratio,(pageW-2*(pad-10))*ratio,(pageH-188)*ratio,16*ratio);ctx.fill();
         ctx.strokeStyle='#DEEDEF';ctx.lineWidth=2;roundRect(ctx,(pad-10)*ratio,100*ratio,(pageW-2*(pad-10))*ratio,(pageH-188)*ratio,16*ratio);ctx.stroke();
-        ctx.save();ctx.translate(canvas.width/2,canvas.height/2);ctx.rotate(33*Math.PI/180);ctx.textAlign='center';
-        ctx.fillStyle='#E9F2F4';ctx.font='bold 96px Arial, sans-serif';ctx.fillText('DoKitly',0,-6);
-        ctx.fillStyle='#E3EEF1';ctx.font='28px Arial, sans-serif';ctx.fillText('dokitly.in',0,44);ctx.restore();
+        ctx.drawImage(wmCanvas,0,0,canvas.width,canvas.height);
         ctx.fillStyle='#172b48';cy=bodyTop;
       }
       function roundRect(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath();}
@@ -594,7 +603,15 @@ function bindBuild2Workspace(id){
       new L.TextRun({text:'Kitly',bold:true,color:'079B99',size:29}),
       new L.TextRun({text:'    dokitly.in  |  Free Browser Tools',color:'51677D',size:18})];
     const header=new L.Header({children:[
-      new L.Paragraph({alignment:L.AlignmentType.CENTER,spacing:{after:40},children:[new L.TextRun({text:'DOKITLY',bold:true,color:'E2EFF1',size:64})]}),
+      new L.Paragraph({children:[new L.ImageRun({
+        data:makeDoKitlyWatermark().toDataURL('image/png'),
+        transformation:{width:794,height:1122},
+        floating:{behindDocument:true,allowOverlap:true,layoutInCell:false,
+          horizontalPosition:{relative:L.HorizontalPositionRelativeFrom.PAGE,offset:0},
+          verticalPosition:{relative:L.VerticalPositionRelativeFrom.PAGE,offset:0},
+          wrap:{type:L.TextWrappingType.NONE}},
+        altText:{title:'DoKitly background watermark',description:'Large diagonal DoKitly navy and teal watermark'}
+      })],spacing:{after:0}}),
       new L.Paragraph({children:logoRuns,spacing:{after:70},border:{bottom:{style:L.BorderStyle.SINGLE,size:7,color:'12B0AC',space:6}},shading:{fill:'F2FBFB'}}),
       new L.Paragraph({children:[new L.TextRun({text:'SMART QUIZ GENERATOR  /  PRACTICE WORKSHEET',bold:true,color:'405570',size:15})],spacing:{after:20}})
     ]});
@@ -605,16 +622,15 @@ function bindBuild2Workspace(id){
       border:{top:{style:L.BorderStyle.SINGLE,size:5,color:'D9E3EF',space:6}},shading:{fill:'F7FCFC'}
     })]});
     const ps=[
-      new L.Paragraph({alignment:L.AlignmentType.CENTER,spacing:{after:40},children:[new L.TextRun({text:'DoKitly',bold:true,color:'E6F2F4',size:52})]}),
       new L.Paragraph({children:[new L.TextRun({text:'Smart Quiz - Practice Worksheet',bold:true,color:'0D3D73',size:28})],spacing:{after:260},shading:{fill:'ECF7F8'}})
     ];
     d.questions.forEach((q,i)=>{
-      ps.push(new L.Paragraph({text:`${i+1}. ${q.q}`,spacing:{before:170,after:100},shading:{fill:i%2===0?'F9FCFD':'F3FAFB'}}));
+      ps.push(new L.Paragraph({text:`${i+1}. ${q.q}`,spacing:{before:170,after:100}}));
       ps.push(new L.Paragraph({text:'Answer: _____________________________________',spacing:{after:120},color:'53697E'}));
     });
     if(d.answers){
       ps.push(new L.Paragraph({text:'Answer key',heading:L.HeadingLevel.HEADING_2,pageBreakBefore:true,spacing:{after:180},shading:{fill:'ECF7F8'}}));
-      d.questions.forEach((q,i)=>ps.push(new L.Paragraph({text:`${i+1}. ${q.a}`,spacing:{after:130},shading:{fill:i%2===0?'F9FCFD':'F3FAFB'}})));
+      d.questions.forEach((q,i)=>ps.push(new L.Paragraph({text:`${i+1}. ${q.a}`,spacing:{after:130}})));
     }
     const doc=new L.Document({
       creator:'DoKitly',
