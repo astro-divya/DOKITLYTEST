@@ -1,0 +1,761 @@
+const IMAGE_TOOLS=[
+['image-compress','🗜️','Image Compressor','Compress an image while keeping the uploaded format unless you choose another format.'],
+['image-resize','↔️','Image Resizer','Resize an image to exact dimensions with before and after preview.'],
+['image-convert','🖼️','Image Converter','Convert images to JPG, PNG or WebP.'],
+['image-info','🔎','Image Info','Check dimensions, file type and file size.'],
+['image-crop','✂️','Crop Image','Select the crop area directly on your image with a live draggable box.'],
+['image-rotate','🔄','Rotate & Flip Image','Rotate or flip an image and preview the result.'],
+['image-percent','📐','Resize by Percentage','Scale an image by percentage while keeping proportions.'],
+['image-target','🎯','Compress to KB','Target a specific file size in KB.'],
+['image-passport','🪪','Passport Photo Resizer','Resize to common photo dimensions with DPI control.'],
+['image-base64','64','Image to Base64','Create a complete Base64 data URL and verify every decoded byte.'],
+['base64-image','🧩','Base64 to Image','Decode a Base64 image data URL and preview it.'],
+['image-filter','✨','Image Adjustments','Live brightness, contrast, saturation, exposure, warmth, hue, blur and more.'],
+
+['image-watermark','💧','Watermark Studio','Add watermarks or clean authorized images with live mask refinement and full-resolution export.'],
+['image-exif','🧹','Remove Image Metadata','Re-export an image locally to strip common metadata.'],
+['image-color','🎨','Image Color Picker','Click an image to inspect pixel color.'],
+['print-size','📏','DPI / Print Size Calculator','Convert pixel dimensions and DPI into physical print size.'],
+['image-bg-remove','🪄','Background Remover','Automatically remove portrait and simple outer backgrounds into a transparent PNG.'],
+['image-grayscale','◐','Grayscale Image','Convert an image to grayscale with live preview.'],
+['image-blur','🌫️','Blur Image','Apply blur with live preview.'],
+['image-sharpen','🔺','Sharpen Image','Control sharpening strength with live preview.'],
+['multi-resize','🗂️','Batch Image Resizer','Resize multiple images and download them together as ZIP.'],
+['multi-compress','📦','Batch Image Compressor','Compress multiple images and download them together as ZIP.']
+];
+const TOOL=Object.fromEntries(IMAGE_TOOLS.map(x=>[x[0],{id:x[0],icon:x[1],name:x[2],desc:x[3]}]));
+const $=id=>document.getElementById(id); const id=document.body.dataset.tool; const t=TOOL[id];
+const supportedOut=new Set(['image/jpeg','image/png','image/webp']);
+const esc=s=>String(s).replace(/[&<>'"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[m]));
+const extForType=type=>type==='image/jpeg'?'jpg':type==='image/png'?'png':type==='image/webp'?'webp':type==='image/avif'?'avif':'png';
+const actionNames={'image-compress':'Compressed','image-resize':'Resized','image-convert':'Converted','image-crop':'Cropped','image-rotate':'Rotated','image-percent':'Resized','image-target':'Compressed','image-passport':'Passport','image-filter':'Adjusted','image-watermark':'Watermark','image-exif':'Clean','image-bg-remove':'BGRemoved','image-grayscale':'Grayscale','image-blur':'Blurred','image-sharpen':'Sharpened','base64-image':'Decoded','multi-resize':'Resized','multi-compress':'Compressed'};
+function typeFor(file,selection='same',transparent=false){if(selection&&selection!=='same')return selection;if(transparent)return'image/png';return supportedOut.has(file?.type)?file.type:(file?.type==='image/jpg'?'image/jpeg':'image/png')}
+function outName(tool,type,index){const name=(TOOL[tool]?.name||tool||'Image').replace(/[^a-z0-9]+/gi,'_').replace(/^_+|_+$/g,'');const act=(actionNames[tool]||'Processed').replace(/[^a-z0-9]+/gi,'_');return `DoKitly_${name}_${act}${index?`_${index}`:''}.${extForType(type)}`}
+function humanSize(n){if(!Number.isFinite(n))return'';return n>=1024*1024?(n/1024/1024).toFixed(2)+' MB':(n/1024).toFixed(1)+' KB'}
+function loadExternal(src,globalName){return new Promise((res,rej)=>{if(globalName&&window[globalName])return res();const old=[...document.scripts].find(x=>x.src===src);if(old){old.addEventListener('load',()=>res(),{once:true});old.addEventListener('error',()=>rej(Error('Decoder failed to load.')),{once:true});return}const s=document.createElement('script');s.src=src;s.async=true;s.onload=()=>res();s.onerror=()=>rej(Error('Decoder failed to load.'));document.head.appendChild(s)})}
+function imageFromBlob(blob){return new Promise((res,rej)=>{const u=URL.createObjectURL(blob),im=new Image();im.onload=()=>res({img:im,url:u});im.onerror=()=>{URL.revokeObjectURL(u);rej(Error('This image could not be opened in the browser.'))};im.src=u})}
+async function readImage(file){if(!file)throw Error('Please select an image first.');const n=(file.name||'').toLowerCase(),type=(file.type||'').toLowerCase();if(/\.tiff?$/.test(n)||/image\/tiff/.test(type)){await loadExternal('https://cdn.jsdelivr.net/npm/utif@3.1.0/UTIF.min.js','UTIF');const buf=await file.arrayBuffer(),ifds=UTIF.decode(buf);if(!ifds.length)throw Error('TIFF contains no readable frame.');UTIF.decodeImage(buf,ifds[0]);const rgba=UTIF.toRGBA8(ifds[0]),c=document.createElement('canvas');c.width=ifds[0].width;c.height=ifds[0].height;c.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(rgba),c.width,c.height),0,0);const blob=await new Promise(r=>c.toBlob(r,'image/png'));c.width=c.height=1;return imageFromBlob(blob)}if(/\.hei[cf]$/.test(n)||/image\/hei[cf]/.test(type)){await loadExternal('https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js','heic2any');let out=await heic2any({blob:file,toType:'image/png'});if(Array.isArray(out))out=out[0];return imageFromBlob(out)}return imageFromBlob(file)}
+function blobFromCanvas(c,type,quality=.92){return new Promise((res,rej)=>c.toBlob(b=>b?res(b):rej(Error('This browser cannot export the selected format.')),type,quality))}
+function canvasDraw(img,w=img.width,h=img.height,type='image/png'){const c=document.createElement('canvas');c.width=Math.max(1,Math.round(w));c.height=Math.max(1,Math.round(h));const x=c.getContext('2d',{willReadFrequently:true});if(type==='image/jpeg'){x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height)}x.drawImage(img,0,0,c.width,c.height);return c}
+function fileInput(label='Select image',multi=false){return `<div class="dropzone upload-row global-upload-row"><div class="upload-name" id="uploadName" title="${label}">${label}</div><label class="file-pick-btn" for="fileInput">Choose File</label><input id="fileInput" class="native-file-input" type="file" accept="image/*" ${multi?'multiple':''}><div id="beforeStage" class="upload-thumb"><span class="empty">Preview</span></div></div>`}
+function formatSelect(includeSame=true,idn='format'){return `<div class="field"><label>Output format</label><select id="${idn}">${includeSame?'<option value="same">Same as upload</option>':''}<option value="image/jpeg">JPG</option><option value="image/png">PNG</option><option value="image/webp">WebP</option></select>${includeSame?'<div class="format-note">Changes only when you choose another format.</div>':''}</div>`}
+function pageShell(inner){return `<div class="it-title"><span class="ico">${t.icon}</span><div><h1>${t.name}</h1><p>${t.desc}</p></div></div><section class="it-panel">${inner}</section>`}
+function signedValue(v,unit=''){const n=Number(v);return `${n>0?'+':''}${n}${unit}`}
+function compactRange(idn,label,min,max,value,unit='',icon='◉',step=1){const signed=min<0,maxTxt=signed?signedValue(value,unit):`${value}${unit}`;return `<div class="control-card simple-control-card branded-range" data-control="${idn}"><div class="control-top"><span class="control-icon">${icon}</span><label for="${idn}">${label}</label><output id="out-${idn}">${maxTxt}</output><button class="mini-reset" type="button" data-range-reset="${idn}" data-default="${value}" title="Reset ${label}">↺</button></div><div class="control-bottom"><button class="nudge" type="button" data-range-nudge="${idn}:-${step}">−</button><input id="${idn}" data-ui-range data-unit="${unit}" data-signed="${signed?'1':'0'}" type="range" min="${min}" max="${max}" step="${step}" value="${value}"><button class="nudge" type="button" data-range-nudge="${idn}:${step}">+</button></div></div>`}
+function adjustmentControls(){
+ const groups=[['Light','☀️',[['brightness','Brightness',-100,100,0,'','◐'],['exposure','Exposure',-50,50,0,'','◒'],['contrast','Contrast',-100,100,0,'','◑'],['highlights','Highlights',-100,100,0,'','✦'],['shadows','Shadows',-100,100,0,'','◼']]],['Color','🎨',[['saturate','Saturation',-100,100,0,'','◉'],['vibrance','Vibrance',-100,100,0,'','✺'],['warmth','Warmth',-100,100,0,'','♨'],['tint','Tint',-100,100,0,'','◈'],['hue','Hue',-180,180,0,'°','◎']]],['Effects','✨',[['blur','Blur',0,20,0,'px','◌'],['sharpen','Sharpen',0,100,0,'','△'],['sepia','Sepia',0,100,0,'','◍'],['grayscale','Grayscale',0,100,0,'','◐'],['opacity','Opacity',-90,0,0,'','◫']]]];
+ const presets=`<div class="preset-bar"><span>Quick looks</span><div class="preset-chips"><button type="button" data-preset="auto">Auto</button><button type="button" data-preset="vivid">Vivid</button><button type="button" data-preset="warm">Warm</button><button type="button" data-preset="cool">Cool</button><button type="button" data-preset="bw">B&W</button></div></div>`;
+ return presets+`<div class="adjustment-groups">${groups.map(([name,ico,rows])=>`<section class="control-group"><div class="control-group-head"><span>${ico}</span><b>${name}</b></div><div class="control-list">${rows.map(r=>`<div class="control-card" data-control="${r[0]}"><div class="control-top"><span class="control-icon">${r[6]}</span><label for="adj-${r[0]}">${r[1]}</label><output id="out-${r[0]}">${signedValue(r[4],r[5])}</output><button class="mini-reset" type="button" data-reset-adj="${r[0]}" title="Reset ${r[1]}">↺</button></div><div class="control-bottom"><button class="nudge" type="button" data-nudge="${r[0]}:-1">−</button><input id="adj-${r[0]}" data-adj="${r[0]}" data-unit="${r[5]}" type="range" min="${r[2]}" max="${r[3]}" value="${r[4]}"><button class="nudge" type="button" data-nudge="${r[0]}:1">+</button></div></div>`).join('')}</div></section>`).join('')}</div>`}
+function editorPreviewHTML(label='Processed Preview'){return `<aside class="editor-preview"><div class="live-preview-card"><div class="preview-head"><div><b>${label}</b><small>Live • stays visible while you edit</small></div><span><small id="afterMeta">Waiting</small> <button class="zoom-btn" data-zoom="after" hidden>Zoom</button></span></div><div class="preview-stage editor-after-stage" id="afterStage"><div class="empty">Upload an image to start.</div></div></div></aside>`}
+function editorWrap(controls,label='Processed Preview'){return `<div class="editor-layout"><div class="editor-controls">${fileInput()}${controls}</div>${editorPreviewHTML(label)}</div>`}
+function textControls(watermark=false){return `<div class="form-grid"><div class="field wide"><label>Text</label><input id="overlayText" value="${watermark?'DoKitly':'Your text'}"></div><div class="field"><label>Size (px)</label><input id="textSize" type="number" value="48" min="8" max="500"></div><div class="field"><label>Color</label><input id="textColor" type="color" value="#ffffff"></div><div class="field"><label>Position</label><select id="position"><option value="tl">Top Left</option><option value="tc">Top Center</option><option value="tr">Top Right</option><option value="cl">Center Left</option><option value="cc" selected>Center</option><option value="cr">Center Right</option><option value="bl">Bottom Left</option><option value="bc">Bottom Center</option><option value="br">Bottom Right</option><option value="custom">Custom X / Y</option></select></div><div class="field"><label>Style</label><select id="fontStyle"><option value="normal">Regular</option><option value="bold" selected>Bold</option><option value="italic">Italic</option><option value="bolditalic">Bold Italic</option></select></div></div>${compactRange('opacity','Opacity',0,100,watermark?45:100,'%','◫')}${compactRange('rotation','Rotation',-180,180,0,'°','↻')}${compactRange('offsetX','Custom X',-100,100,0,'','↔')}${compactRange('offsetY','Custom Y',-100,100,0,'','↕')}`}
+function render(){let inner='';
+ if(id==='print-size') inner=`<div class="form-grid"><div class="field"><label>Width (px)</label><input id="printW" type="number" value="3000"></div><div class="field"><label>Height (px)</label><input id="printH" type="number" value="2000"></div><div class="field"><label>DPI</label><input id="printDpi" type="number" value="300"></div></div><div class="btns"><button class="btn" id="processBtn">Calculate</button></div><div class="status" id="status">Enter values and calculate.</div>`;
+ else if(id==='image-info') inner=`${fileInput()}<div class="status" id="infoOut">Upload an image.</div>`;
+ else if(id==='image-base64') inner=`${fileInput()}<div class="btns"><button class="btn" id="processBtn">Convert to Base64</button><button class="btn-secondary" id="copyBtn" disabled>Copy full Base64</button><button class="btn-secondary" id="saveBase64Btn" disabled>Save .txt</button><button class="btn-secondary" id="openVerifiedBtn" disabled>Open verified image</button></div><div class="field base64-field"><label>Complete Base64 data URL <small id="base64Count"></small></label><textarea id="base64Out" readonly spellcheck="false"></textarea></div><div class="status" id="status">Base64 is generated from exact file bytes and decoded back before verification.</div><div class="verify-card"><div class="preview-head"><b>Verified decoded preview</b><small id="afterMeta">Waiting</small></div><div class="preview-stage" id="afterStage"><div class="empty">Verified image appears here.</div></div></div>`;
+ else if(id==='base64-image') inner=`<div class="field"><label>Paste Base64 data URL</label><textarea id="base64In" placeholder="data:image/png;base64,..." spellcheck="false"></textarea></div><div class="btns"><button class="btn" id="processBtn">Preview image</button></div><div class="status" id="status">Paste a complete image data URL.</div><div class="verify-card"><div class="preview-head"><b>Decoded image</b><small id="afterMeta">Waiting</small></div><div class="preview-stage" id="afterStage"><div class="empty">Preview appears here.</div></div></div>`;
+ else if(id==='image-color') inner=`${fileInput()}<div class="color-tool-help"><b>Click the thumbnail preview to pick a color</b><div class="color-readout"><div class="swatch" id="swatch"></div><div><b id="hexOut">#—</b><div class="note" id="rgbOut">RGB —</div></div></div></div>`;
+ else if(id==='multi-resize'||id==='multi-compress') inner=`<div class="editor-layout"><div class="editor-controls">${fileInput('Select multiple images',true)}${id==='multi-compress'?compactRange('quality','Quality',10,100,75,'%','◉'):''}<div class="form-grid">${id==='multi-resize'?'<div class="field"><label>Maximum width (px)</label><input id="batchWidth" type="number" value="1200" min="50"></div>':''}${formatSelect(true)}</div><div class="btns"><button class="btn" id="processBtn">Process batch</button><button class="btn-secondary" id="cancelBatchBtn" type="button">Cancel</button><button class="btn-secondary" id="retryBatchBtn" type="button" disabled>Retry failed</button></div><div class="batch-list" id="batchList"></div><div class="status" id="status">Preview shows the first selected image.</div></div>${editorPreviewHTML('First Image Preview')}</div>`;
+ else {
+  let controls='';
+  if(id==='image-filter') controls=`${adjustmentControls()}<div class="form-grid editor-format">${formatSelect(true)}</div><div class="btns"><button class="btn" id="processBtn">Process result</button><button class="btn-secondary" id="undoAdjustBtn" type="button">Undo</button><button class="btn-secondary" id="redoAdjustBtn" type="button">Redo</button><button class="btn-secondary" id="resetBtn">Reset All</button></div><div class="status" id="status">Live preview is optimized for smooth editing. Full resolution is used on download.</div>`;
+  else if(id==='image-grayscale') controls=`${compactRange('simpleLive','Grayscale',0,100,0,'','◐')}<div class="form-grid">${formatSelect(true)}</div><div class="btns"><button class="btn" id="processBtn">Process result</button></div><div class="status" id="status">Use slider, +/−, or keyboard arrow keys.</div>`;
+  else if(id==='image-blur') controls=`${compactRange('simpleLive','Blur',0,20,0,'px','◌')}<div class="form-grid">${formatSelect(true)}</div><div class="btns"><button class="btn" id="processBtn">Process result</button></div><div class="status" id="status">Live blur preview; only one download button.</div>`;
+  else if(id==='image-sharpen') controls=`${compactRange('sharpenAmount','Sharpen',0,100,0,'','△')}<div class="form-grid">${formatSelect(true)}</div><div class="btns"><button class="btn" id="processBtn">Process result</button></div><div class="status" id="status">Increase sharpening only as much as needed.</div>`;
+  else if(id==='image-crop') controls=`<div class="ratio-row"><button data-ratio="free" class="active">Free</button><button data-ratio="1">1:1</button><button data-ratio="1.333333">4:3</button><button data-ratio="1.5">3:2</button><button data-ratio="1.777778">16:9</button><button data-ratio="0.5625">9:16</button></div><div class="crop-editor-card"><div class="preview-head"><b>Live crop selection</b><small id="cropMeta">Upload an image</small></div><div class="crop-stage" id="cropStage"><div class="empty">Crop box appears here.</div></div></div><div class="form-grid">${formatSelect(true)}</div><div class="btns"><button class="btn" id="processBtn">Process crop</button></div><div class="status" id="status">Drag the crop box or its corner. Preview on the right stays visible.</div>`;
+  else if(id==='image-compress') controls=`${compactRange('quality','Quality',10,100,80,'%','◉')}<div class="form-grid"><div class="field"><label>Target size (optional KB)</label><input id="targetKB" type="number" min="1" placeholder="e.g. 100"></div><div class="field"><label>Width (optional px)</label><input id="width" type="number" min="1" placeholder="Original"></div><div class="field"><label>Height (optional px)</label><input id="height" type="number" min="1" placeholder="Original"></div>${formatSelect(true)}</div><div class="btns"><button class="btn" id="processBtn">Process compression</button></div><div class="status" id="status">Live preview updates without re-encoding on every slider step.</div>`;
+  else if(id==='image-resize') controls=`<div class="form-grid"><div class="field"><label>Width (px)</label><input id="width" type="number" min="1" placeholder="e.g. 1200"></div><div class="field"><label>Height (px)</label><input id="height" type="number" min="1" placeholder="Auto"></div><div class="field"><label>Scale (%)</label><input id="resizePercent" type="number" min="1" max="1000" value="100"></div><div class="field"><label>Fit mode</label><select id="resizeFit"><option value="stretch">Exact / Stretch</option><option value="contain">Fit inside</option><option value="cover">Fill & crop</option></select></div><div class="field wide"><label><input id="lockRatio" type="checkbox" checked> Keep aspect ratio</label></div><div class="note wide" id="upscaleNote"></div>${formatSelect(true)}</div><div class="btns"><button class="btn" id="processBtn">Process resize</button></div><div class="status" id="status">Enter width or height; preview updates live.</div>`;
+  else if(id==='image-convert') controls=`${compactRange('quality','Quality (JPG/WebP/AVIF)',10,100,90,'%','◉')}<div class="form-grid">${formatSelect(false)}<div class="field wide"><label><input id="allowFirstFrame" type="checkbox"> For an animated GIF/WebP, explicitly extract only the first frame</label></div></div><div class="btns"><button class="btn" id="processBtn">Process conversion</button></div><div class="status" id="status">Only formats this browser can genuinely encode are offered. Animation is never silently flattened.</div>`;
+  else if(id==='image-rotate') controls=`<div class="form-grid"><div class="field"><label>Rotate</label><select id="rotate"><option value="0" selected>0° — Original</option><option value="90">90°</option><option value="180">180°</option><option value="270">270°</option></select></div><div class="field"><label>Flip</label><select id="flip"><option value="none">No flip</option><option value="h">Horizontal</option><option value="v">Vertical</option></select></div>${formatSelect(true)}</div><div class="btns"><button class="btn" id="processBtn">Process result</button></div><div class="status" id="status">0° keeps the uploaded orientation unchanged.</div>`;
+  else if(id==='image-percent') controls=`${compactRange('percent','Scale',10,300,100,'%','↔',1)}<div class="form-grid">${formatSelect(true)}</div><div class="btns"><button class="btn" id="processBtn">Process resize</button></div><div class="status" id="status">100% is original size.</div>`;
+  else if(id==='image-target') controls=`<div class="form-grid"><div class="field"><label>Target size (KB)</label><select id="targetSelect"><option>20</option><option>50</option><option selected>100</option><option>200</option><option>500</option><option value="custom">Custom</option></select></div><div class="field"><label>Custom KB</label><input id="targetCustom" type="number" min="1" placeholder="e.g. 75"></div><div class="field"><label>Output format</label><select id="format"><option value="same">Same as upload</option><option value="image/jpeg">JPG</option><option value="image/webp">WebP</option><option value="image/png">PNG</option></select></div></div><div class="btns"><button class="btn" id="processBtn">Compress Image</button><button class="btn-secondary" id="targetDownloadBtn" disabled>Download Image</button></div><div class="status" id="status">Set a target, compress, review the result, then download.</div>`;
+  else if(id==='image-passport') controls=`<div class="form-grid"><div class="field"><label>Preset</label><select id="passportPreset"><option value="35,45">35 × 45 mm</option><option value="51,51">2 × 2 inch (51 × 51 mm)</option><option value="35,35">35 × 35 mm</option></select></div><div class="field"><label>DPI</label><input id="dpi" type="number" min="72" max="1200" value="300"></div><div class="field"><label>Background</label><select id="passportBg"><option value="keep">Keep original</option><option value="#ffffff">White</option><option value="#dceeff">Light Blue</option><option value="#3b82f6">Blue</option><option value="#e5e7eb">Light Grey</option><option value="#ef4444">Red</option></select></div><div class="field"><label>Target KB (optional)</label><input id="passportTargetKB" type="number" min="5" placeholder="e.g. 100"></div>${formatSelect(true)}</div>${compactRange('passportZoom','Zoom',70,220,110,'%','⌕')}${compactRange('passportX','Left / Right',-100,100,0,'','↔')}${compactRange('passportY','Up / Down',-100,100,-8,'','↕')}<div class="btns"><button class="btn-secondary" id="autoFaceBtn" type="button">Auto center face</button><button class="btn" id="processBtn">Process passport photo</button><button class="btn-secondary" id="passportSheetBtn" type="button">Printable 4×6 sheet</button></div><div class="status" id="status">Auto face centering uses the browser face detector where available. Use zoom/position for final framing. Presets are dimensions only; always verify the authority’s current rules.</div>`;
+  else if(id==='image-watermark') controls=`<div class="wm-mode-tabs" role="tablist"><button type="button" id="wmAddTab">Add Watermark</button><button type="button" class="active" id="wmRemoveTab">Remove Watermark</button></div><div id="wmAddPanel" hidden>${textControls(true)}</div><div id="wmRemovePanel" class="wm-auto-panel"><div class="wm-authorized-note"><b>Automatic watermark removal for images you own or are authorized to edit.</b></div><div class="wm-auto-actions"><button class="btn" type="button" id="wmAutoDetect">Auto Detect</button><button class="btn-secondary" type="button" id="wmSelectArea">Select Area</button></div><p class="wm-select-help">Normally use Auto Detect. If it misses the watermark, select one rectangular area around it.</p><div hidden><input id="wmExpand" type="range" min="0" max="24" value="5"><input id="wmFeather" type="range" min="0" max="24" value="4"><select id="wmPreviewMode"><option value="result">Cleaned result</option></select><input id="wmCompare" type="range" min="0" max="100" value="100"></div></div><div class="form-grid">${formatSelect(true)}</div><div class="btns"><button class="btn" id="processBtn">Remove Watermark</button></div><div class="status" id="status">Upload an image, then remove the watermark automatically.</div>`;
+  else if(id==='image-exif') controls=`<div class="form-grid">${formatSelect(true)}</div><div class="btns"><button class="btn" id="processBtn">Process clean copy</button></div><div class="status" id="status">The re-exported image drops common EXIF metadata.</div>`;
+  else if(id==='image-bg-remove') controls=`<div class="bg-auto-note"><b>Automatic transparent background</b><p>Fast uses the compact model. Detail uses a larger alternative; it may help on some photos and worsen others. Try each model and review the output. Both run on your device after model download.</p></div><div class="form-grid"><div class="field wide"><label for="bgModel">AI model</label><select id="bgModel"><option value="fast">Fast — U2NetP (~4.4 MB, default)</option><option value="detail">Detail — Silueta (~44 MB, slower / more memory)</option></select><small>Detail is optional. First use needs internet; model quality varies by photo. No image is uploaded.</small></div></div><div class="btns"><button class="btn" id="processBtn">Remove Background</button><button class="btn-secondary" id="bgCompareBtn" type="button">Compare Fast vs Detail</button><button class="btn-secondary" id="bgCancelCompareBtn" type="button" hidden>Cancel comparison</button><button class="btn-secondary" id="bgResetBtn" type="button">Choose Another Image</button></div><section id="bgComparePanel" class="dk-bg-compare" hidden aria-label="Fast versus Detail results"><h3>Compare both AI models</h3><p>Compare actual cutouts, then select Fast, Detail or experimental Balanced to refine and download. Balanced combines both masks near uncertain edges: it may help on some images and harm others. Comparing runs both engines and may take several minutes.</p><div class="dk-bg-compare-grid" id="bgCompareGrid"></div><button id="bgCompareDownloadBoth" class="btn-secondary" type="button" disabled>Download comparison PNGs (ZIP)</button></section><div class="bg-refine" id="bgRefine" hidden><div class="form-grid"><div class="field"><label>Preview background</label><select id="bgPreviewMode"><option value="checker">Checker</option><option value="white">White</option><option value="dark">Dark</option></select></div><div class="field"><label>Brush</label><select id="bgBrushMode"><option value="erase">Erase</option><option value="restore">Restore</option></select></div><div class="field"><label>Brush size</label><input id="bgBrushSize" type="range" min="4" max="160" value="36"></div><div class="field"><label>Edge softness</label><input id="bgBrushSoft" type="range" min="0" max="100" value="35"></div></div><p class="note">Paint directly on the processed preview. Erase removes leftover background; Restore paints original pixels back. Full-resolution alpha is exported.</p></div><div class="status" id="status">Upload an image, then choose Remove Background. The download stays disabled until a nonblank PNG passes verification.</div>`;
+  inner=editorWrap(controls);
+ }
+ $('toolRoot').innerHTML=pageShell(inner);
+(function detectOutputCapabilities(){if(id!=='image-convert')return;const sel=$('format'),c=document.createElement('canvas');c.width=c.height=2;try{if(c.toDataURL('image/avif').startsWith('data:image/avif')){supportedOut.add('image/avif');const o=document.createElement('option');o.value='image/avif';o.textContent='AVIF';sel?.appendChild(o)}}catch{}const note=document.createElement('div');note.className='format-note';note.textContent='TIFF and HEIC/HEIF inputs use lazy local decoders when needed. BMP/TIFF/ICO/HEIC outputs stay hidden because this build has no verified browser encoder for them; DoKitly does not fake those conversions.';sel?.parentElement?.appendChild(note)})();
+}
+render();
+if(id==='image-convert'&&$('fileInput'))$('fileInput').accept='image/*,.tif,.tiff,.heic,.heif';
+
+const needsSeparateDownload=!['image-info','image-color','print-size','image-base64','base64-image','image-target'].includes(id);
+if(needsSeparateDownload&&$('processBtn')){const b=document.createElement('button');b.type='button';b.id='finalImageDownload';b.className='btn-secondary';b.disabled=true;b.textContent=id==='multi-resize'||id==='multi-compress'?'Download ZIP':'Download processed file';$('processBtn').parentElement.appendChild(b)}
+
+let bgSelectionRun=0,bgProcessRun=0,bgCompareActiveRun=0,bgCompareResults=Object.create(null),bgCompareURLs=[];
+// A comparison may show Fast while Detail is still running. Stop that run when
+// the user chooses an output, switches images/models or starts another job.
+function resetBgCompareControls(){bgCompareActiveRun=0;const cancel=$('bgCancelCompareBtn');if(cancel)cancel.hidden=true;const compare=$('bgCompareBtn'),process=$('processBtn');if(compare)compare.disabled=false;if(process)process.disabled=false;}
+function clearBgComparison(){for(const url of bgCompareURLs)URL.revokeObjectURL(url);bgCompareURLs=[];bgCompareResults=Object.create(null);const panel=$('bgComparePanel');if(panel)panel.hidden=true;const grid=$('bgCompareGrid');if(grid)grid.textContent='';const both=$('bgCompareDownloadBoth');if(both)both.disabled=true;}
+let batchCancelled=false,batchFailed=[];let currentFile=null,currentImg=null,beforeURL=null,afterURL=null,lastPreviewCanvas=null,verifiedBlobURL=null,bgEditCanvas=null,bgPointer=null,cropState=null,cropRatio=null,previewRAF=0,previewSeq=0,targetResultBlob=null,targetResultType=null,preparedResultBlob=null,preparedResultType=null,preparedResultName=null,batchZipBlob=null;
+let wmMode='add',wmMask=null,wmHistory=[],wmRedoStack=[],wmRectStart=null,wmPaint=false,wmLiveTimer=0;
+function setStatus(msg,strong=''){if($('status'))$('status').innerHTML=strong?`<strong>${esc(strong)}</strong> ${esc(msg)}`:esc(msg)}
+function selectedType(forceTransparent=false){return typeFor(currentFile,$('format')?.value||'same',forceTransparent)}
+function quality(){return Number($('quality')?.value||92)/100}
+function showBefore(file,img,url){if(id==='image-watermark'){clearTimeout(wmLiveTimer);wmLiveTimer=0;wmMask=null;wmHistory=[];wmRedoStack=[];}if(id==='image-bg-remove'){clearBgComparison();bgEditCanvas=null;bgPointer=null;++bgBlobRun;clearTimeout(bgBlobTimer);$('bgRefine')?.setAttribute('hidden','');}currentFile=file;currentImg=img;preparedResultBlob=null;batchZipBlob=null;if($('finalImageDownload'))$('finalImageDownload').disabled=true;if(id==='image-target'){targetResultBlob=null;targetResultType=null;if($('targetDownloadBtn'))$('targetDownloadBtn').disabled=true;}if(beforeURL&&beforeURL!==url)URL.revokeObjectURL(beforeURL);beforeURL=url;const name=$('uploadName');if(name){name.textContent=file.name;name.title=file.name}const stage=$('beforeStage');if(stage){stage.innerHTML=`<img id="beforeImg" src="${url}" alt="${esc(file.name)}">`;stage.title=file.name}if($('beforeMeta'))$('beforeMeta').textContent=`${img.width} × ${img.height} • ${humanSize(file.size)}`;document.querySelector('[data-zoom="before"]')?.removeAttribute('hidden')}
+function previewSource(maxSide=900){if(!currentImg)return null;const scale=Math.min(1,maxSide/Math.max(currentImg.width,currentImg.height));return {img:currentImg,w:Math.max(1,Math.round(currentImg.width*scale)),h:Math.max(1,Math.round(currentImg.height*scale)),scale}}
+function fitPreviewMedia(stage=$('afterStage')){
+ if(!stage)return;
+ const media=stage.querySelector('canvas,img');
+ if(!media)return;
+ const apply=()=>{
+  const cs=getComputedStyle(stage),boxW=Math.max(1,stage.clientWidth-parseFloat(cs.paddingLeft||0)-parseFloat(cs.paddingRight||0)),boxH=Math.max(1,stage.clientHeight-parseFloat(cs.paddingTop||0)-parseFloat(cs.paddingBottom||0));
+  const srcW=media.tagName==='CANVAS'?media.width:media.naturalWidth,srcH=media.tagName==='CANVAS'?media.height:media.naturalHeight;
+  if(!srcW||!srcH)return;
+  const scale=Math.min(boxW/srcW,boxH/srcH),w=Math.max(1,Math.floor(srcW*scale)),h=Math.max(1,Math.floor(srcH*scale));
+  media.style.setProperty('width',w+'px','important');media.style.setProperty('height',h+'px','important');media.style.setProperty('max-width','none','important');media.style.setProperty('max-height','none','important');media.style.setProperty('object-fit','contain','important');media.style.setProperty('display','block','important');media.style.setProperty('margin','auto','important');
+ };
+ if(media.tagName==='IMG'&&!media.complete)media.addEventListener('load',apply,{once:true});else apply();
+}
+function showCanvasPreview(c,meta=''){lastPreviewCanvas=c;const stage=$('afterStage');if(!stage)return;stage.innerHTML='';stage.appendChild(c);c.classList.add('preview-canvas');fitPreviewMedia(stage);requestAnimationFrame(()=>fitPreviewMedia(stage));if($('afterMeta'))$('afterMeta').textContent=meta||`${c.width} × ${c.height}`;document.querySelector('[data-zoom="after"]')?.removeAttribute('hidden')}
+function showCompareSlider(c){if(!beforeURL||!c||!['image-bg-remove','image-watermark'].includes(id))return;const stage=$('afterStage');if(!stage)return;const wrap=document.createElement('div');wrap.className='dk33-compare';const before=document.createElement('img');before.src=beforeURL;before.alt='Before';const after=document.createElement('div');after.className='dk33-after';const clone=document.createElement('canvas');clone.width=c.width;clone.height=c.height;clone.getContext('2d').drawImage(c,0,0);after.appendChild(clone);const lb=document.createElement('span');lb.className='dk33-compare-label before';lb.textContent='Before';const la=document.createElement('span');la.className='dk33-compare-label after';la.textContent='After';const range=document.createElement('input');range.type='range';range.min=0;range.max=100;range.value=50;range.setAttribute('aria-label','Compare before and after');range.oninput=()=>after.style.width=range.value+'%';wrap.append(before,after,lb,la,range);stage.innerHTML='';stage.appendChild(wrap)}
+async function triggerDownload(blob,name){if(window.DoKitlyDownload?.routeBlob){await window.DoKitlyDownload.routeBlob(blob,{filename:name,mimeType:blob.type,tool:id});return}if(afterURL)URL.revokeObjectURL(afterURL);afterURL=URL.createObjectURL(blob);const a=document.createElement('a');a.href=afterURL;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>{if(afterURL){URL.revokeObjectURL(afterURL);afterURL=null}},4000)}
+function positionXY(ctx,txt,size,pos,w,h,ox=0,oy=0){const m=ctx.measureText(txt),pad=Math.max(8,Math.round(Math.min(w,h)*.025));let x=(w-m.width)/2,y=(h-size)/2;if(pos[0]==='t')y=pad;if(pos[0]==='b')y=h-size-pad;if(pos[1]==='l')x=pad;if(pos[1]==='r')x=w-m.width-pad;if(pos==='custom'){x=w/2-m.width/2+(ox/100)*(w/2);y=h/2-size/2+(oy/100)*(h/2)}return{x,y,m}}
+function applySharpen(c,amount){if(amount<=0)return c;const ctx=c.getContext('2d',{willReadFrequently:true}),src=ctx.getImageData(0,0,c.width,c.height),out=ctx.createImageData(c.width,c.height),sd=src.data,od=out.data,w=c.width,h=c.height,amt=Math.min(1,amount/100);od.set(sd);for(let y=1;y<h-1;y++){for(let x=1;x<w-1;x++){const p=(y*w+x)*4;for(let ch=0;ch<3;ch++){const sharp=5*sd[p+ch]-sd[p-4+ch]-sd[p+4+ch]-sd[p-w*4+ch]-sd[p+w*4+ch];od[p+ch]=Math.max(0,Math.min(255,sd[p+ch]*(1-amt)+sharp*amt))}od[p+3]=sd[p+3]}}ctx.putImageData(out,0,0);return c}
+function adjustmentFilter(){const v=n=>Number($('adj-'+n)?.value||0),brightness=(100+v('brightness'))*(100+v('exposure'))/100,sat=(100+v('saturate'))*(100+v('vibrance'))/100;return{filter:`brightness(${Math.max(0,brightness)}%) contrast(${Math.max(0,100+v('contrast'))}%) saturate(${Math.max(0,sat)}%) hue-rotate(${v('hue')}deg) blur(${v('blur')}px) sepia(${v('sepia')}%) grayscale(${v('grayscale')}%) opacity(${Math.max(10,100+v('opacity'))}%)`,warmth:v('warmth'),tint:v('tint'),highlights:v('highlights'),shadows:v('shadows'),sharpen:v('sharpen')}}
+function drawVisual(full=false){if(!currentImg)return null;const src=full?{w:currentImg.width,h:currentImg.height,scale:1}:previewSource(id==='image-filter'?600:900);let type=selectedType(id==='image-bg-remove'),c,ctx;
+ if(id==='image-crop'){if(!cropState)return null;const s=cropState,sx=s.imgW/s.dispW,sy=s.imgH/s.dispH,fx=Math.round(s.x*sx),fy=Math.round(s.y*sy),fw=Math.max(1,Math.round(s.w*sx)),fh=Math.max(1,Math.round(s.h*sy)),scale=full?1:Math.min(1,900/Math.max(fw,fh));c=document.createElement('canvas');c.width=Math.max(1,Math.round(fw*scale));c.height=Math.max(1,Math.round(fh*scale));c.getContext('2d').drawImage(currentImg,fx,fy,fw,fh,0,0,c.width,c.height);return c}
+ if(id==='image-compress'){let w=Number($('width')?.value)||currentImg.width,h=Number($('height')?.value)||currentImg.height;if(Number($('width')?.value)&&!Number($('height')?.value))h=currentImg.height*w/currentImg.width;if(Number($('height')?.value)&&!Number($('width')?.value))w=currentImg.width*h/currentImg.height;if(!full){const sc=Math.min(1,900/Math.max(w,h));w*=sc;h*=sc}return canvasDraw(currentImg,w,h,type)}
+ if(id==='multi-resize'){let w=currentImg.width,h=currentImg.height,mw=Number($('batchWidth')?.value)||1200;if(w>mw){h*=mw/w;w=mw}if(!full){const sc=Math.min(1,900/Math.max(w,h));w*=sc;h*=sc}return canvasDraw(currentImg,w,h,type)}
+ if(id==='image-resize'){const pct=Math.max(.01,Number($('resizePercent')?.value||100)/100),rawW=Number($('width')?.value),rawH=Number($('height')?.value);let w=rawW||currentImg.width*pct,h=rawH||currentImg.height*pct;if($('lockRatio')?.checked){if(rawW&&!rawH)h=currentImg.height*w/currentImg.width;else if(rawH&&!rawW)w=currentImg.width*h/currentImg.height;else if(rawW&&rawH){const fit=$('resizeFit')?.value||'stretch',r=fit==='cover'?Math.max(w/currentImg.width,h/currentImg.height):Math.min(w/currentImg.width,h/currentImg.height);if(fit!=='stretch'){const tw=w,th=h,sw=currentImg.width*r,sh=currentImg.height*r,c=document.createElement('canvas');c.width=Math.max(1,Math.round(tw));c.height=Math.max(1,Math.round(th));const x=c.getContext('2d');if(type==='image/jpeg'){x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height)}x.drawImage(currentImg,(tw-sw)/2,(th-sh)/2,sw,sh);if(!full&&Math.max(c.width,c.height)>900){const q=canvasDraw(c,c.width*Math.min(1,900/Math.max(c.width,c.height)),c.height*Math.min(1,900/Math.max(c.width,c.height)),type);c.width=c.height=1;return q}return c}}else h=currentImg.height*w/currentImg.width}h=h||currentImg.height;if(!full){const sc=Math.min(1,900/Math.max(w,h));w*=sc;h*=sc}return canvasDraw(currentImg,w,h,type)}
+ if(id==='image-percent'){const p=Number($('percent')?.value||100)/100;let w=currentImg.width*p,h=currentImg.height*p;if(!full){const sc=Math.min(1,900/Math.max(w,h));w*=sc;h*=sc}return canvasDraw(currentImg,w,h,type)}
+ if(id==='image-passport'){const[mw,mh]=($('passportPreset')?.value||'35,45').split(',').map(Number),dpi=Number($('dpi')?.value)||300;let w=mw/25.4*dpi,h=mh/25.4*dpi;if(!full){const sc=Math.min(1,900/Math.max(w,h));w*=sc;h*=sc}w=Math.max(1,Math.round(w));h=Math.max(1,Math.round(h));const c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d'),zoom=(Number($('passportZoom')?.value)||110)/100,ox=(Number($('passportX')?.value)||0)/100*w*.45,oy=(Number($('passportY')?.value)||0)/100*h*.45,sc=Math.max(w/currentImg.width,h/currentImg.height)*zoom,dw=currentImg.width*sc,dh=currentImg.height*sc;x.fillStyle='#fff';x.fillRect(0,0,w,h);x.drawImage(currentImg,(w-dw)/2+ox,(h-dh)/2+oy,dw,dh);return c}
+ if(id==='image-rotate'){const deg=Number($('rotate')?.value||0),swap=deg%180!==0,w0=src.w,h0=src.h;c=document.createElement('canvas');c.width=swap?h0:w0;c.height=swap?w0:h0;ctx=c.getContext('2d');if(type==='image/jpeg'){ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height)}ctx.translate(c.width/2,c.height/2);ctx.rotate(deg*Math.PI/180);const f=$('flip')?.value||'none';ctx.scale(f==='h'?-1:1,f==='v'?-1:1);ctx.drawImage(currentImg,-w0/2,-h0/2,w0,h0);return c}
+ c=canvasDraw(currentImg,src.w,src.h,type);ctx=c.getContext('2d',{willReadFrequently:true});
+ if(id==='image-filter'){ctx.clearRect(0,0,c.width,c.height);const a=adjustmentFilter();if(type==='image/jpeg'){ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height)}ctx.filter=a.filter;ctx.drawImage(currentImg,0,0,c.width,c.height);ctx.filter='none';if(a.warmth||a.tint){ctx.globalCompositeOperation='source-atop';if(a.warmth){ctx.globalAlpha=Math.min(.30,Math.abs(a.warmth)/300);ctx.fillStyle=a.warmth>0?'#ff8a32':'#3b82f6';ctx.fillRect(0,0,c.width,c.height)}if(a.tint){ctx.globalAlpha=Math.min(.24,Math.abs(a.tint)/340);ctx.fillStyle=a.tint>0?'#d946ef':'#22c55e';ctx.fillRect(0,0,c.width,c.height)}ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over'}if(a.highlights||a.shadows){const im=ctx.getImageData(0,0,c.width,c.height),d=im.data,hi=a.highlights/100,sh=a.shadows/100;for(let i=0;i<d.length;i+=4){const lum=(.2126*d[i]+.7152*d[i+1]+.0722*d[i+2])/255,delta=hi*lum*lum*70+sh*(1-lum)*(1-lum)*70;d[i]=Math.max(0,Math.min(255,d[i]+delta));d[i+1]=Math.max(0,Math.min(255,d[i+1]+delta));d[i+2]=Math.max(0,Math.min(255,d[i+2]+delta))}ctx.putImageData(im,0,0)}if(a.sharpen)applySharpen(c,a.sharpen)}
+ else if(id==='image-grayscale'){ctx.clearRect(0,0,c.width,c.height);ctx.filter=`grayscale(${Number($('simpleLive')?.value||0)}%)`;ctx.drawImage(currentImg,0,0,c.width,c.height);ctx.filter='none'}
+ else if(id==='image-blur'){ctx.clearRect(0,0,c.width,c.height);ctx.filter=`blur(${Number($('simpleLive')?.value||0)}px)`;ctx.drawImage(currentImg,0,0,c.width,c.height);ctx.filter='none'}
+ else if(id==='image-sharpen')applySharpen(c,Number($('sharpenAmount')?.value||0));
+ else if(id==='image-watermark'&&wmMode==='add'){const txt=$('overlayText')?.value||'',sizeRaw=Number($('textSize')?.value||48),size=full?sizeRaw:Math.max(8,sizeRaw*src.scale),pos=$('position')?.value||'cc',opacity=Number($('opacity')?.value??100)/100,rot=Number($('rotation')?.value||0),ox=Number($('offsetX')?.value||0),oy=Number($('offsetY')?.value||0),style=$('fontStyle')?.value||'bold';ctx.save();ctx.globalAlpha=opacity;ctx.fillStyle=$('textColor')?.value||'#fff';ctx.font=`${style.includes('italic')?'italic ':''}${style.includes('bold')?'700':'400'} ${size}px system-ui`;ctx.textBaseline='top';const p=positionXY(ctx,txt,size,pos,c.width,c.height,ox,oy);ctx.translate(p.x+p.m.width/2,p.y+size/2);ctx.rotate(rot*Math.PI/180);ctx.fillText(txt,-p.m.width/2,-size/2);ctx.restore()}
+ else if(id==='image-bg-remove'){/* Preview remains the original until automatic processing finishes. */}
+ return c}
+function schedulePreview(){if(!currentImg||['image-base64','image-info','image-color','base64-image','print-size'].includes(id))return;cancelAnimationFrame(previewRAF);const seq=++previewSeq;previewRAF=requestAnimationFrame(()=>{setTimeout(()=>{if(seq!==previewSeq)return;try{const c=drawVisual(false);if(c)showCanvasPreview(c,`${c.width} × ${c.height} preview`)}catch(e){setStatus(e.message)}},0)})}
+async function handleFile(file){if(!file)return;
+ const bgChoice=id==='image-bg-remove'?++bgSelectionRun:0;
+ if(bgChoice){
+  clearBgComparison();
+  ++bgProcessRun;window.DoKitlyBackgroundAI?.cancel?.();resetBgCompareControls();
+  bgEditCanvas=null;bgPointer=null;++bgBlobRun;clearTimeout(bgBlobTimer);
+  preparedResultBlob=null;preparedResultName=null;
+  if($('finalImageDownload'))$('finalImageDownload').disabled=true;
+  $('bgRefine')?.setAttribute('hidden','');setStatus('Loading new image…');
+ }
+ let r;
+ try{r=await readImage(file)}catch(err){
+  // A previous, now-abandoned selection must not overwrite the status of the
+  // latest image (especially after a slow decoder or failed network resource).
+  if(bgChoice&&bgChoice!==bgSelectionRun)return;
+  throw err;
+ }
+ if(bgChoice&&bgChoice!==bgSelectionRun){URL.revokeObjectURL(r.url);return}
+ showBefore(file,r.img,r.url);if(bgChoice)setStatus('Image ready. Choose Remove Background.');if(id==='image-crop')initCrop(r.img,r.url);if(id==='image-color')bindColorCanvas(r.img);if(id==='image-info')$('infoOut').innerHTML=`<strong>${esc(file.name)}</strong><br>${r.img.width} × ${r.img.height}px • ${esc(file.type||'unknown')} • ${humanSize(file.size)}`;if(id==='image-exif'){metadataSignals(file).then(a=>setStatus(a.length?`Detected metadata containers: ${a.join(', ')}. Process a clean copy to remove and verify them.`:'No common EXIF/XMP/IPTC metadata container detected; re-export can still normalize the image.','Metadata:')).catch(()=>{})}if(!['image-base64','image-info','image-color'].includes(id))schedulePreview()}
+$('fileInput')?.addEventListener('change',e=>{const files=[...(e.target.files||[])];if(!files.length)return;const name=$('uploadName');if(name&&files.length>1){name.textContent=`${files.length} images selected`;name.title=files.map(f=>f.name).join(' • ')}if(id==='multi-resize'||id==='multi-compress'){handleFile(files[0]).then(()=>{if(name){name.textContent=`${files.length} images selected`;name.title=files.map(f=>f.name).join(' • ')}}).catch(err=>setStatus(err.message));return}handleFile(files[0]).catch(err=>setStatus(err.message))});
+
+document.addEventListener('click',e=>{const z=e.target.closest('[data-zoom]');if(!z)return;const src=z.dataset.zoom==='before'?beforeURL:null;const m=document.createElement('div');m.className='preview-modal';m.innerHTML='<button class="preview-close" aria-label="Close">×</button>';if(src){const im=document.createElement('img');im.src=src;m.appendChild(im)}else if(lastPreviewCanvas){m.appendChild(lastPreviewCanvas.cloneNode(true));const c=m.querySelector('canvas');c.width=lastPreviewCanvas.width;c.height=lastPreviewCanvas.height;c.getContext('2d').drawImage(lastPreviewCanvas,0,0)}else return;document.body.appendChild(m);m.querySelector('button').onclick=()=>m.remove();m.onclick=ev=>{if(ev.target===m)m.remove()}});
+
+function bindCropDrag(){const box=$('cropBox'),handle=$('cropHandle');if(!box||!handle)return;let mode=null,start=null,orig=null;const down=(e,m)=>{e.preventDefault();mode=m;start={x:e.clientX,y:e.clientY};orig={...cropState};box.setPointerCapture?.(e.pointerId)};box.onpointerdown=e=>{if(e.target===handle)return;down(e,'move')};handle.onpointerdown=e=>{e.stopPropagation();down(e,'resize')};box.onpointermove=e=>{if(!mode)return;const dx=e.clientX-start.x,dy=e.clientY-start.y;if(mode==='move'){cropState.x=orig.x+dx;cropState.y=orig.y+dy}else{cropState.w=orig.w+dx;cropState.h=cropRatio?cropState.w/cropRatio:orig.h+dy}constrainCrop();paintCrop(true)};box.onpointerup=()=>{mode=null;paintCrop(true)};box.onpointercancel=()=>mode=null}
+function constrainCrop(){const s=cropState;if(!s)return;s.w=Math.max(30,Math.min(s.w,s.dispW-s.x));s.h=Math.max(30,Math.min(s.h,s.dispH-s.y));s.x=Math.max(0,Math.min(s.x,s.dispW-s.w));s.y=Math.max(0,Math.min(s.y,s.dispH-s.h));if(cropRatio){let h=s.w/cropRatio;if(s.y+h<=s.dispH)s.h=h;else{s.h=s.dispH-s.y;s.w=s.h*cropRatio}}}
+function paintCrop(update=true){if(!cropState)return;const b=$('cropBox'),s=cropState;if(!b)return;b.style.transform=`translate3d(${s.x}px,${s.y}px,0)`;b.style.width=s.w+'px';b.style.height=s.h+'px';const sx=s.imgW/s.dispW,sy=s.imgH/s.dispH;$('cropMeta').textContent=`${Math.round(s.x*sx)}, ${Math.round(s.y*sy)} • ${Math.round(s.w*sx)} × ${Math.round(s.h*sy)}px`;if(update)schedulePreview()}
+function initCrop(img,url){const stage=$('cropStage');if(!stage)return;stage.innerHTML=`<div class="crop-wrap" id="cropWrap"><img id="cropImg" src="${url}" alt="Crop source"><div class="crop-box" id="cropBox"><span class="crop-handle" id="cropHandle"></span></div></div>`;const image=$('cropImg');const ready=()=>{const wr=image.clientWidth,hr=image.clientHeight;if(!wr||!hr)return;cropState={x:wr*.1,y:hr*.1,w:wr*.8,h:hr*.8,dispW:wr,dispH:hr,imgW:img.width,imgH:img.height};paintCrop(true);bindCropDrag()};image.onload=ready;if(image.complete)requestAnimationFrame(ready)}
+if(id==='image-crop'){document.querySelectorAll('[data-ratio]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-ratio]').forEach(x=>x.classList.remove('active'));b.classList.add('active');cropRatio=b.dataset.ratio==='free'?null:Number(b.dataset.ratio);if(cropState&&cropRatio){cropState.h=cropState.w/cropRatio;constrainCrop();paintCrop(true)}})}
+
+function bindRanges(){
+ document.querySelectorAll('[data-ui-range]').forEach(el=>{const out=$('out-'+el.id),unit=el.dataset.unit||'',def=Number(el.value),isSigned=el.dataset.signed==='1';el.dataset.default=def;const refresh=()=>{if(out)out.textContent=isSigned?signedValue(el.value,unit):`${el.value}${unit}`;const card=el.closest('.control-card');card?.classList.toggle('changed',Number(el.value)!==def);schedulePreview()};el.addEventListener('input',refresh);el.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key))requestAnimationFrame(refresh)});refresh()});
+ document.querySelectorAll('[data-range-nudge]').forEach(btn=>btn.addEventListener('click',()=>{const[rid,deltaS]=btn.dataset.rangeNudge.split(':'),el=$(rid);if(!el)return;el.value=Math.max(Number(el.min),Math.min(Number(el.max),Number(el.value)+Number(deltaS)));el.dispatchEvent(new Event('input',{bubbles:true}));el.focus()}));
+ document.querySelectorAll('[data-range-reset]').forEach(btn=>btn.addEventListener('click',()=>{const el=$(btn.dataset.rangeReset);if(!el)return;el.value=btn.dataset.default;el.dispatchEvent(new Event('input',{bubbles:true}));el.focus()}));
+}
+bindRanges();
+if(id==='image-filter'){
+ const defaults={brightness:0,contrast:0,saturate:0,exposure:0,highlights:0,shadows:0,warmth:0,tint:0,hue:0,vibrance:0,blur:0,sepia:0,grayscale:0,opacity:0,sharpen:0};
+ const units={brightness:'',contrast:'',saturate:'',exposure:'',highlights:'',shadows:'',warmth:'',tint:'',hue:'°',vibrance:'',blur:'px',sepia:'',grayscale:'',opacity:'',sharpen:''};
+ const update=el=>{const key=el.dataset.adj,out=$('out-'+key);if(out)out.textContent=signedValue(el.value,units[key]);el.closest('.control-card')?.classList.toggle('changed',Number(el.value)!==defaults[key]);schedulePreview()};
+ document.querySelectorAll('[data-adj]').forEach(el=>{el.addEventListener('input',()=>update(el));el.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key))requestAnimationFrame(()=>update(el))})});
+ document.querySelectorAll('[data-reset-adj]').forEach(btn=>btn.onclick=()=>{const el=$('adj-'+btn.dataset.resetAdj);el.value=defaults[btn.dataset.resetAdj];el.dispatchEvent(new Event('input',{bubbles:true}))});
+ document.querySelectorAll('[data-nudge]').forEach(btn=>btn.onclick=()=>{const[k,s]=btn.dataset.nudge.split(':'),el=$('adj-'+k);el.value=Math.max(Number(el.min),Math.min(Number(el.max),Number(el.value)+Number(s)));el.dispatchEvent(new Event('input',{bubbles:true}));el.focus()});
+ const presets={auto:{brightness:4,contrast:6,saturate:6,exposure:1,highlights:2,shadows:4,vibrance:8},vivid:{brightness:3,contrast:12,saturate:28,exposure:1,vibrance:26},warm:{brightness:3,contrast:4,saturate:8,warmth:35,vibrance:8},cool:{brightness:2,contrast:5,saturate:3,warmth:-32,tint:-5},bw:{brightness:3,contrast:12,grayscale:100,saturate:-100,vibrance:-100}};
+ const apply=vals=>document.querySelectorAll('[data-adj]').forEach(el=>{el.value=vals[el.dataset.adj]??0;update(el)});
+ document.querySelectorAll('[data-preset]').forEach(btn=>btn.onclick=()=>{document.querySelectorAll('[data-preset]').forEach(x=>x.classList.remove('selected'));btn.classList.add('selected');apply(presets[btn.dataset.preset]||{})});
+ if($('resetBtn'))$('resetBtn').onclick=()=>{document.querySelectorAll('[data-preset]').forEach(x=>x.classList.remove('selected'));apply({})};
+}
+let adjustUndo=[],adjustRedo=[],adjustLock=false;
+function adjustmentSnapshot(){const o={};document.querySelectorAll('[data-adj]').forEach(el=>o[el.dataset.adj]=el.value);return o}
+function restoreAdjustmentSnapshot(o){if(!o)return;adjustLock=true;document.querySelectorAll('[data-adj]').forEach(el=>{if(o[el.dataset.adj]!=null){el.value=o[el.dataset.adj];el.dispatchEvent(new Event('input',{bubbles:true}))}});adjustLock=false;schedulePreview()}
+function pushAdjustmentHistory(){if(id!=='image-filter'||adjustLock)return;const snap=adjustmentSnapshot(),last=adjustUndo[adjustUndo.length-1];if(last&&JSON.stringify(last)===JSON.stringify(snap))return;adjustUndo.push(snap);if(adjustUndo.length>40)adjustUndo.shift();adjustRedo=[]}
+if(id==='image-filter'){setTimeout(()=>pushAdjustmentHistory(),0);document.querySelectorAll('[data-adj]').forEach(el=>el.addEventListener('change',pushAdjustmentHistory));$('undoAdjustBtn')?.addEventListener('click',()=>{if(adjustUndo.length<2)return;adjustRedo.push(adjustUndo.pop());restoreAdjustmentSnapshot(adjustUndo[adjustUndo.length-1])});$('redoAdjustBtn')?.addEventListener('click',()=>{const n=adjustRedo.pop();if(!n)return;adjustUndo.push(n);restoreAdjustmentSnapshot(n)})}
+// Text/watermark direct manipulation: dragging the processed preview switches to custom position.
+if(id==='image-watermark'){let drag=false;const stage=$('afterStage');stage?.addEventListener('pointerdown',e=>{if(!currentImg||(id==='image-watermark'&&wmMode!=='add'))return;drag=true;stage.setPointerCapture?.(e.pointerId);const move=ev=>{if(!drag)return;const r=stage.getBoundingClientRect(),x=((ev.clientX-r.left)/r.width*200-100),y=((ev.clientY-r.top)/r.height*200-100);$('position').value='custom';$('offsetX').value=Math.max(-100,Math.min(100,Math.round(x)));$('offsetY').value=Math.max(-100,Math.min(100,Math.round(y)));$('offsetX').dispatchEvent(new Event('input',{bubbles:true}));$('offsetY').dispatchEvent(new Event('input',{bubbles:true}))};move(e);const up=()=>{drag=false;stage.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up)};stage.addEventListener('pointermove',move);window.addEventListener('pointerup',up,{once:true})})}
+
+function wmEnsureMask(){if(!currentImg)return null;const src=previewSource(900);if(!wmMask||wmMask.width!==src.w||wmMask.height!==src.h){wmMask=document.createElement('canvas');wmMask.width=src.w;wmMask.height=src.h;wmHistory=[];wmRedoStack=[]}return wmMask}
+function wmSnapshot(){if(!wmMask)return;const x=wmMask.getContext('2d'),d=x.getImageData(0,0,wmMask.width,wmMask.height);wmHistory.push(d);if(wmHistory.length>30)wmHistory.shift();wmRedoStack=[]}
+function wmScheduleLive(){
+ if(id!=='image-watermark'||!currentImg||wmMode!=='remove')return;
+ clearTimeout(wmLiveTimer);
+ const source=currentImg;
+ // A changed mask must not leave a previously exported file downloadable.
+ preparedResultBlob=null;preparedResultType=null;preparedResultName=null;
+ if($('finalImageDownload'))$('finalImageDownload').disabled=true;
+ wmLiveTimer=setTimeout(()=>{
+  wmLiveTimer=0;
+  if(currentImg!==source||wmMode!=='remove')return;
+  try{
+   const masked=wmMaskHasPixels();
+   const result=masked?wmBuildResult(false):drawVisual(false);
+   if(result)showCanvasPreview(result,`${result.width} × ${result.height} • ${masked?'cleaned preview':'original preview'}`);
+  }catch(err){setStatus(`Live preview unavailable: ${err.message}`)}
+ },100);
+}
+function wmRestore(d){if(!d||!wmMask)return;wmMask.getContext('2d').putImageData(d,0,0);wmScheduleLive()}
+function wmExpandedMask(targetW,targetH){const m=wmEnsureMask(),out=document.createElement('canvas');out.width=targetW;out.height=targetH;const x=out.getContext('2d');x.drawImage(m,0,0,targetW,targetH);const expand=Number($('wmExpand')?.value||0)*targetW/m.width,feather=Number($('wmFeather')?.value||0)*targetW/m.width;if(expand>0){const base=document.createElement('canvas');base.width=targetW;base.height=targetH;base.getContext('2d').drawImage(out,0,0);x.globalCompositeOperation='source-over';for(let a=0;a<Math.PI*2;a+=Math.PI/8)x.drawImage(base,Math.cos(a)*expand,Math.sin(a)*expand)}if(feather>0){const base=document.createElement('canvas');base.width=targetW;base.height=targetH;base.getContext('2d').drawImage(out,0,0);x.clearRect(0,0,targetW,targetH);x.filter=`blur(${Math.min(30,feather)}px)`;x.drawImage(base,0,0);x.filter='none'}return out}
+function wmBuildResult(full=false){
+ if(!currentImg)return null;
+ const src=full?{w:currentImg.width,h:currentImg.height}:previewSource(900),base=canvasDraw(currentImg,src.w,src.h,selectedType(false)),mask=wmExpandedMask(src.w,src.h),ctx=base.getContext('2d'),md=mask.getContext('2d',{willReadFrequently:true}).getImageData(0,0,src.w,src.h).data;
+ const image=ctx.getImageData(0,0,src.w,src.h),d=image.data,out=new Uint8ClampedArray(d),known=new Uint8Array(src.w*src.h),queued=new Uint8Array(src.w*src.h),queue=new Int32Array(src.w*src.h);let head=0,tail=0;
+ for(let p=0;p<known.length;p++)if(md[p*4+3]<20)known[p]=1;
+ const enqueueBoundary=p=>{if(known[p]||queued[p])return;const x=p%src.w,y=(p/src.w)|0;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){if(!dx&&!dy)continue;const xx=x+dx,yy=y+dy;if(xx>=0&&yy>=0&&xx<src.w&&yy<src.h&&known[yy*src.w+xx]){queued[p]=1;queue[tail++]=p;return}}};
+ for(let p=0;p<known.length;p++)if(!known[p])enqueueBoundary(p);
+ // Build 31: linear-time boundary propagation. Each masked pixel is reconstructed once
+ // from already reconstructed/real neighbours, avoiding the previous flat 8-point smear.
+ while(head<tail){const p=queue[head++],x=p%src.w,y=(p/src.w)|0;let rr=0,gg=0,bb=0,aa=0,wt=0;for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++){if(!dx&&!dy)continue;const xx=x+dx,yy=y+dy;if(xx<0||yy<0||xx>=src.w||yy>=src.h)continue;const q=yy*src.w+xx;if(!known[q])continue;const w=1/Math.max(1,Math.hypot(dx,dy)),j=q*4;rr+=out[j]*w;gg+=out[j+1]*w;bb+=out[j+2]*w;aa+=out[j+3]*w;wt+=w}if(wt){const i=p*4;out[i]=rr/wt;out[i+1]=gg/wt;out[i+2]=bb/wt;out[i+3]=aa/wt}known[p]=1;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const xx=x+dx,yy=y+dy;if(xx<0||yy<0||xx>=src.w||yy>=src.h)continue;enqueueBoundary(yy*src.w+xx)}}
+ // Blend feathered boundary with the original according to mask strength.
+ for(let p=0;p<known.length;p++){const a=md[p*4+3]/255;if(a<=0||a>=.98)continue;const i=p*4;for(let c=0;c<4;c++)out[i+c]=Math.round(d[i+c]*(1-a)+out[i+c]*a)}
+ ctx.putImageData(new ImageData(out,src.w,src.h),0,0);return base;
+}
+function wmMaskHasPixels(){if(!wmMask)return false;const d=wmMask.getContext('2d',{willReadFrequently:true}).getImageData(0,0,wmMask.width,wmMask.height).data;for(let i=3;i<d.length;i+=16)if(d[i]>18)return true;return false}
+function wmAutoDetect(){if(!currentImg)return setStatus('Select an image first.');const m=wmEnsureMask(),src=previewSource(900),c=canvasDraw(currentImg,src.w,src.h),x=c.getContext('2d',{willReadFrequently:true}),im=x.getImageData(0,0,c.width,c.height),d=im.data,mx=m.getContext('2d',{willReadFrequently:true});mx.clearRect(0,0,m.width,m.height);const out=mx.createImageData(m.width,m.height),o=out.data,w=m.width,h=m.height,lum=new Float32Array(w*h);for(let p=0;p<w*h;p++){const i=p*4;lum[p]=.299*d[i]+.587*d[i+1]+.114*d[i+2]}let hits=0;for(let y=3;y<h-3;y++)for(let xx=3;xx<w-3;xx++){const p=y*w+xx,i=p*4,L=lum[p],sat=Math.max(d[i],d[i+1],d[i+2])-Math.min(d[i],d[i+1],d[i+2]);let ring=0,n=0;for(let k=-3;k<=3;k++){ring+=lum[(y-3)*w+xx+k]+lum[(y+3)*w+xx+k]+lum[(y+k)*w+xx-3]+lum[(y+k)*w+xx+3];n+=4}const local=ring/n,contrast=Math.abs(L-local),gx=Math.abs(lum[p+1]-lum[p-1]),gy=Math.abs(lum[p+w]-lum[p-w]),edge=gx+gy;const pale=sat<58&&L>115;const dark=sat<58&&L<145;if((pale||dark)&&contrast>15&&edge>20){o[i]=o[i+1]=o[i+2]=255;o[i+3]=220;hits++}}mx.putImageData(out,0,0);mx.save();mx.globalCompositeOperation='source-over';mx.filter='blur(1.2px)';mx.drawImage(m,0,0);mx.filter='none';mx.restore();wmSnapshot();wmScheduleLive();setStatus(hits?'Watermark candidate detected. Review the preview, then select Remove Watermark.':'No confident watermark was detected. Use Select Area and draw one box around the watermark.','Auto:')}
+function wmBindEditor(){if(id!=='image-watermark')return;const add=$('wmAddTab'),rem=$('wmRemoveTab'),ap=$('wmAddPanel'),rp=$('wmRemovePanel'),stage=$('afterStage');let selecting=false,box=null,startPoint=null;const setMode=m=>{wmMode=m;add?.classList.toggle('active',m==='add');rem?.classList.toggle('active',m==='remove');if(ap)ap.hidden=m!=='add';if(rp)rp.hidden=m!=='remove';preparedResultBlob=null;if($('finalImageDownload'))$('finalImageDownload').disabled=true;if(m==='remove'){wmEnsureMask();wmScheduleLive();setStatus('Auto Detect is ready. Use Select Area only if automatic detection misses the watermark.')}else schedulePreview()};add?.addEventListener('click',()=>setMode('add'));rem?.addEventListener('click',()=>setMode('remove'));$('wmAutoDetect')?.addEventListener('click',wmAutoDetect);$('wmSelectArea')?.addEventListener('click',()=>{if(!currentImg)return setStatus('Select an image first.');selecting=!selecting;document.body.classList.toggle('wm-selecting',selecting);$('wmSelectArea').textContent=selecting?'Cancel Selection':'Select Area';setStatus(selecting?'Drag one rectangle around the watermark.':'Selection cancelled.')});stage?.addEventListener('pointerdown',e=>{if(wmMode!=='remove'||!selecting||!currentImg)return;const r=stage.getBoundingClientRect();startPoint={x:e.clientX-r.left,y:e.clientY-r.top,r};box=document.createElement('div');box.className='wm-selection-box';box.style.left=startPoint.x+'px';box.style.top=startPoint.y+'px';stage.style.position='relative';stage.appendChild(box);stage.setPointerCapture?.(e.pointerId)});stage?.addEventListener('pointermove',e=>{if(!startPoint||!box)return;const x=e.clientX-startPoint.r.left,y=e.clientY-startPoint.r.top;box.style.left=Math.min(startPoint.x,x)+'px';box.style.top=Math.min(startPoint.y,y)+'px';box.style.width=Math.abs(x-startPoint.x)+'px';box.style.height=Math.abs(y-startPoint.y)+'px'});stage?.addEventListener('pointerup',e=>{if(!startPoint||!box)return;const m=wmEnsureMask(),r=startPoint.r,x=e.clientX-r.left,y=e.clientY-r.top,sx=Math.min(startPoint.x,x)*m.width/r.width,sy=Math.min(startPoint.y,y)*m.height/r.height,sw=Math.abs(x-startPoint.x)*m.width/r.width,sh=Math.abs(y-startPoint.y)*m.height/r.height;box.remove();box=null;startPoint=null;selecting=false;document.body.classList.remove('wm-selecting');$('wmSelectArea').textContent='Select Area';if(sw<3||sh<3)return setStatus('Selection was too small.');const cx=m.getContext('2d');cx.clearRect(0,0,m.width,m.height);cx.fillStyle='#fff';cx.fillRect(sx,sy,sw,sh);wmSnapshot();wmScheduleLive();setStatus('Area selected. Review the preview, then select Remove Watermark.','Selected:')});setMode('remove')}
+
+wmBindEditor();
+const liveControlIds=['format','rotate','flip','width','height','lockRatio','resizePercent','resizeFit','targetKB','targetSelect','targetCustom','passportPreset','dpi','passportBg','passportTargetKB','passportZoom','passportX','passportY','borderW','borderColor','overlayText','textSize','textColor','position','fontStyle','batchWidth'];
+liveControlIds.forEach(k=>{$(k)?.addEventListener('input',schedulePreview);$(k)?.addEventListener('change',schedulePreview)});
+function updateUpscaleNote(){if(id!=='image-resize'||!currentImg)return;const w=Number($('width')?.value)||currentImg.width*Number($('resizePercent')?.value||100)/100,h=Number($('height')?.value)||currentImg.height*Number($('resizePercent')?.value||100)/100;const n=$('upscaleNote');if(n)n.textContent=(w>currentImg.width||h>currentImg.height)?'Upscaling enlarges pixels; it cannot recreate missing detail.':''}
+['width','height','resizePercent'].forEach(k=>$(k)?.addEventListener('input',updateUpscaleNote));
+
+async function compressToKB(targetKB,type,full=true){if(!currentImg)throw Error('Please select an image first.');const limit=targetKB*1024;if(limit<500)throw Error('Target size is too small.');let scale=1,best=null,bestCanvas=null;for(let pass=0;pass<12;pass++){const w=Math.max(1,Math.round(currentImg.width*scale)),h=Math.max(1,Math.round(currentImg.height*scale)),c=canvasDraw(currentImg,w,h,type);if(type==='image/png'){const b=await blobFromCanvas(c,type);if(b.size<=limit)return{blob:b,canvas:c};best=b;bestCanvas=c}else{let lo=.02,hi=.98,hit=null;for(let i=0;i<12;i++){const q=(lo+hi)/2,b=await blobFromCanvas(c,type,q);if(b.size<=limit){hit=b;lo=q}else hi=q}if(hit)return{blob:hit,canvas:c};const low=await blobFromCanvas(c,type,.02);best=low;bestCanvas=c}scale*=.86;if(Math.min(currentImg.width*scale,currentImg.height*scale)<40)break}return{blob:best,canvas:bestCanvas,miss:true}}
+let selfieSegmenter=null;
+async function personMaskCanvas(source){
+ if(!window.SelfieSegmentation && typeof window.DoKitlyEnsureOptionalEngine==='function')await window.DoKitlyEnsureOptionalEngine('portrait',()=>typeof window.SelfieSegmentation==='function',['https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation@0.1.1675465747/selfie_segmentation.js','https://unpkg.com/@mediapipe/selfie_segmentation@0.1.1675465747/selfie_segmentation.js']);
+ if(!window.SelfieSegmentation)throw Error('Optional portrait segmenter unavailable.');
+ if(!selfieSegmenter){
+  selfieSegmenter=new SelfieSegmentation({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation@0.1.1675465747/${f}`});
+  selfieSegmenter.setOptions({modelSelection:1});
+ }
+ return new Promise((resolve,reject)=>{
+  let finished=false;let timer=setTimeout(()=>{if(!finished){finished=true;reject(Error('Portrait segmentation timed out.'));}},15000);
+  selfieSegmenter.onResults(r=>{
+   if(finished)return;finished=true;clearTimeout(timer);
+   try{
+    const out=document.createElement('canvas');out.width=source.width;out.height=source.height;
+    const x=out.getContext('2d',{willReadFrequently:true});x.drawImage(r.segmentationMask,0,0,out.width,out.height);
+    const d=x.getImageData(0,0,out.width,out.height),a=d.data;
+    let alphaLow=255,alphaHigh=0,colorLow=255,colorHigh=0;
+    for(let i=0;i<a.length;i+=32){alphaLow=Math.min(alphaLow,a[i+3]);alphaHigh=Math.max(alphaHigh,a[i+3]);colorLow=Math.min(colorLow,a[i]);colorHigh=Math.max(colorHigh,a[i]);}
+    const useAlpha=(alphaHigh-alphaLow)>24;
+    for(let i=0;i<a.length;i+=4){const v=useAlpha?a[i+3]:(.3*a[i]+.59*a[i+1]+.11*a[i+2]);a[i]=a[i+1]=a[i+2]=255;a[i+3]=Math.round(v);}
+    x.putImageData(d,0,0);resolve(out);
+   }catch(e){reject(e)}
+  });
+  Promise.resolve().then(()=>selfieSegmenter.send({image:source})).catch(e=>{if(!finished){finished=true;clearTimeout(timer);reject(e)}});
+ });
+}
+function canvasAlphaStats(c){
+ const t=document.createElement('canvas');t.width=60;t.height=60;
+ const x=t.getContext('2d',{willReadFrequently:true});x.drawImage(c,0,0,60,60);
+ const d=x.getImageData(0,0,60,60).data;let visible=0,clear=0;
+ for(let i=3;i<d.length;i+=4){if(d[i]>24)visible++;if(d[i]<225)clear++;}
+ return{visible:visible/3600,clear:clear/3600};
+}
+function sampleBorderColor(source){
+ const w=64,h=Math.max(24,Math.round(64*source.height/source.width)),c=canvasDraw(source,w,h),x=c.getContext('2d',{willReadFrequently:true}),d=x.getImageData(0,0,w,h).data,vals=[[],[],[]];
+ const add=i=>{if(d[i+3]<16)return;vals[0].push(d[i]);vals[1].push(d[i+1]);vals[2].push(d[i+2])};
+ for(let xx=0;xx<w;xx+=2){add(xx*4);add(((h-1)*w+xx)*4)}for(let yy=1;yy<h-1;yy+=2){add((yy*w)*4);add((yy*w+w-1)*4)}
+ const med=a=>{a.sort((a,b)=>a-b);return a.length?a[Math.floor(a.length/2)]:255};
+ const bg=vals.map(med),spread=Math.max(...vals.map((a,k)=>a.length?Math.max(...a.map(v=>Math.abs(v-bg[k]))):255));return{bg,spread};
+}
+function refineAlphaMask(mask){
+ const out=document.createElement('canvas');out.width=mask.width;out.height=mask.height;const x=out.getContext('2d',{willReadFrequently:true});
+ x.filter='blur(0.75px)';x.drawImage(mask,0,0);x.filter='none';const im=x.getImageData(0,0,out.width,out.height),a=im.data;
+ for(let i=0;i<a.length;i+=4){let v=a[i+3]/255;v=Math.max(0,Math.min(1,(v-.035)/.93));v=v*v*(3-2*v);a[i]=a[i+1]=a[i+2]=255;a[i+3]=Math.round(v*255)}x.putImageData(im,0,0);return out;
+}
+function decontaminateEdges(out,source){
+ const sample=sampleBorderColor(source);if(sample.spread>62)return out;const bg=sample.bg,x=out.getContext('2d',{willReadFrequently:true}),im=x.getImageData(0,0,out.width,out.height),d=im.data;
+ for(let i=0;i<d.length;i+=4){const a=d[i+3]/255;if(a<=.06||a>=.97)continue;const strength=Math.min(.72,Math.max(0,(1-a)*.9));for(let k=0;k<3;k++){const est=(d[i+k]-bg[k]*(1-a))/Math.max(a,.08),cl=Math.max(0,Math.min(255,est));d[i+k]=Math.round(d[i+k]*(1-strength)+cl*strength)}}x.putImageData(im,0,0);return out;
+}
+function applyAlphaMask(source,mask){
+ const out=canvasDraw(source,source.width,source.height,'image/png'),x=out.getContext('2d'),refined=refineAlphaMask(mask);
+ x.globalCompositeOperation='destination-in';x.drawImage(refined,0,0,out.width,out.height);x.globalCompositeOperation='source-over';return decontaminateEdges(out,source);
+}
+// Automatic edge-connected background removal for plain/near-uniform photo backgrounds.
+// Never infer foreground by deleting all pixels of a color: only pixels connected to the canvas border are removed.
+function removeOuterBackground(source){
+ const max=720,sc=Math.min(1,max/Math.max(source.width,source.height));
+ const w=Math.max(1,Math.round(source.width*sc)),h=Math.max(1,Math.round(source.height*sc));
+ const small=canvasDraw(source,w,h),x=small.getContext('2d',{willReadFrequently:true}),d=x.getImageData(0,0,w,h).data;
+ const coords=[[1,1],[w-2,1],[1,h-2],[w-2,h-2]].map(([xx,yy])=>Math.max(0,Math.min(w-1,yy))*w+Math.max(0,Math.min(w-1,xx)));
+ const samples=coords.map(i=>[d[i*4],d[i*4+1],d[i*4+2]]);
+ const bg=[0,1,2].map(k=>samples.map(a=>a[k]).sort((a,b)=>a-b)[2]);
+ const dist=(i)=>{let sum=0;for(let ch=0;ch<3;ch++){const a=d[i*4+ch]-bg[ch];sum+=a*a;}return Math.sqrt(sum);};
+ const spread=Math.max(...coords.map(dist));
+ if(spread>72)throw Error('The outer background is complex or varies strongly. Try a clearer subject/portrait; no blank image was created.');
+ const tol=Math.min(78,Math.max(30,30+spread*.8));
+ const seen=new Uint8Array(w*h),queue=new Int32Array(w*h);let front=0,back=0;
+ function add(i){if(i<0||i>=seen.length||seen[i]||d[i*4+3]<25)return;if(dist(i)>tol)return;seen[i]=1;queue[back++]=i;}
+ for(let j=0;j<w;j++){add(j);add((h-1)*w+j)}
+ for(let j=0;j<h;j++){add(j*w);add(j*w+w-1)}
+ while(front<back){const i=queue[front++],xx=i%w; if(xx>0)add(i-1);if(xx<w-1)add(i+1);add(i-w);add(i+w);}
+ const removed=back/(w*h);if(removed<.015||removed>.98)throw Error('A safe foreground/background separation could not be identified. Your original image was not replaced.');
+ const m=document.createElement('canvas');m.width=w;m.height=h;const mx=m.getContext('2d'),v=mx.createImageData(w,h);
+ for(let i=0;i<seen.length;i++){v.data[i*4]=v.data[i*4+1]=v.data[i*4+2]=255;v.data[i*4+3]=seen[i]?0:255;}
+ mx.putImageData(v,0,0);return applyAlphaMask(source,m);
+}
+function cleanSegmentationFringe(out,source){
+ // Correct edge spill using nearby transparent-background pixels, not a single
+ // global background color (which fails on trees, grass and patterned scenes).
+ const w=out.width,h=out.height,lim=1250,ratio=Math.min(1,lim/Math.max(w,h));
+ const sw=Math.max(1,Math.round(w*ratio)),sh=Math.max(1,Math.round(h*ratio));
+ const m=document.createElement('canvas');m.width=sw;m.height=sh;
+ const mx=m.getContext('2d',{willReadFrequently:true});mx.drawImage(out,0,0,sw,sh);
+ const src=document.createElement('canvas');src.width=sw;src.height=sh;
+ const sx=src.getContext('2d',{willReadFrequently:true});sx.drawImage(source,0,0,sw,sh);
+ const md=mx.getImageData(0,0,sw,sh),sd=sx.getImageData(0,0,sw,sh).data,d=md.data;
+ const radius=3,alpha=new Uint8Array(sw*sh);
+ // On large photos keep edge color corrections as signed deltas instead of
+ // discarding them when the refined matte is upscaled to the source size.
+ const edgeDelta=ratio===1?null:new Int16Array(sw*sh*3);for(let i=0;i<alpha.length;i++)alpha[i]=d[i*4+3];
+ for(let y=0;y<sh;y++)for(let x=0;x<sw;x++){
+  const i=y*sw+x,a=alpha[i]/255;if(a<.035||a>.97)continue;
+  let bg=[0,0,0],count=0;
+  for(let dy=-radius;dy<=radius;dy++)for(let dx=-radius;dx<=radius;dx++){
+   const xx=x+dx,yy=y+dy;if(xx<0||yy<0||xx>=sw||yy>=sh)continue;
+   const j=yy*sw+xx;if(alpha[j]>18)continue;
+   for(let k=0;k<3;k++)bg[k]+=sd[j*4+k];count++;
+  }
+  if(count<2)continue;
+  for(let k=0;k<3;k++){
+   const background=bg[k]/count,observed=sd[i*4+k];
+   const unmixed=Math.max(0,Math.min(255,(observed-(1-a)*background)/Math.max(.18,a)));
+   d[i*4+k]=Math.round(observed*(1-Math.min(.85,(1-a)*1.15))+unmixed*Math.min(.85,(1-a)*1.15));
+   if(edgeDelta)edgeDelta[i*3+k]=d[i*4+k]-observed;
+  }
+  d[i*4+3]=Math.max(0,Math.round(alpha[i]-Math.min(20,(1-a)*18)));
+ }
+ mx.putImageData(md,0,0);
+ // Keep full-resolution output, transfer only refined matte/color around edges.
+ const oc=out.getContext('2d',{willReadFrequently:true});
+ if(ratio===1){oc.clearRect(0,0,w,h);oc.drawImage(m,0,0);return out}
+ oc.clearRect(0,0,w,h);oc.drawImage(source,0,0,w,h);
+ oc.globalCompositeOperation='destination-in';oc.drawImage(m,0,0,w,h);oc.globalCompositeOperation='source-over';
+ // The matte was refined at up to 1250px for memory/CPU safety. The legacy
+ // upscale applied only alpha, losing its computed RGB spill correction. Apply
+ // smoothly interpolated RGB *deltas* to partially transparent edge pixels;
+ // retain original full-resolution pixels everywhere else.
+ const stripeRows=128;
+ for(let top=0;top<h;top+=stripeRows){
+  const rows=Math.min(stripeRows,h-top),full=oc.getImageData(0,top,w,rows),pixels=full.data;
+  for(let row=0;row<rows;row++){
+   const y=top+row;
+   const sy=Math.max(0,Math.min(sh-1,(y+.5)*sh/h-.5)),y0=Math.floor(sy),y1=Math.min(sh-1,y0+1),ty=sy-y0;
+  for(let xx=0;xx<w;xx++){
+   const i=(row*w+xx)*4,a=pixels[i+3];if(a<=8||a>=247)continue;
+   const sxp=Math.max(0,Math.min(sw-1,(xx+.5)*sw/w-.5)),x0=Math.floor(sxp),x1=Math.min(sw-1,x0+1),tx=sxp-x0;
+   const q00=(y0*sw+x0)*3,q01=(y0*sw+x1)*3,q10=(y1*sw+x0)*3,q11=(y1*sw+x1)*3;
+   for(let k=0;k<3;k++){
+    const top=edgeDelta[q00+k]*(1-tx)+edgeDelta[q01+k]*tx;
+    const bottom=edgeDelta[q10+k]*(1-tx)+edgeDelta[q11+k]*tx;
+    pixels[i+k]=Math.max(0,Math.min(255,Math.round(pixels[i+k]+top*(1-ty)+bottom*ty)));
+   }
+  }
+ }
+  oc.putImageData(full,0,top);
+ }
+ m.width=m.height=src.width=src.height=1;
+ return out;
+}
+async function autoRemoveBackground(source,run=bgProcessRun,modelOverride=null){
+ if(!window.DoKitlyBackgroundAI?.remove)throw Error('Background engine did not load. Refresh once and try again.');
+ const chosenModel=modelOverride||($('bgModel')?.value==='detail'?'detail':'fast');
+ let out;
+ try{out=await window.DoKitlyBackgroundAI.remove(source,msg=>{if(run===bgProcessRun)setStatus(msg)}, {model:chosenModel});}
+ catch(e){throw Error(`Background engine could not process this image: ${e?.message||e}. If Detail is unavailable, choose Fast and retry.`)}
+ const st=canvasAlphaStats(out);
+ if(st.visible<.015||st.clear<.012||st.visible>.985)throw Error('Background AI could not identify a reliable foreground/background separation for this image.');
+ return{canvas:cleanSegmentationFringe(out,source),method:(chosenModel==='detail'?'Silueta Detail':'U2NetP Fast')+' browser background segmentation'};
+}
+async function removePersonBackground(source,bg=null){const mask=await personMaskCanvas(source);const st=canvasAlphaStats(mask);if(st.visible<.015||st.visible>.98)throw Error('No reliable person mask found.');const out=applyAlphaMask(source,mask);if(bg){const x=out.getContext('2d');x.globalCompositeOperation='destination-over';x.fillStyle=bg;x.fillRect(0,0,out.width,out.height);x.globalCompositeOperation='source-over';}return out;}
+function bindBgEditor(c){
+ bgEditCanvas=c;$('bgRefine')?.removeAttribute('hidden');showCanvasPreview(c,`${c.width} × ${c.height} • manual refine ready`);
+ const stage=$('afterStage');if(!stage)return;c.style.touchAction='none';c.style.cursor='crosshair';
+ // Reuse a bounded brush tile rather than allocating another full-resolution image per stroke.
+ const brushTile=document.createElement('canvas');let previousPoint=null;
+ function brushStamp(px,py,radius,soft,mode){
+  const x=c.getContext('2d');
+  if(mode==='erase'){
+   x.save();x.globalCompositeOperation='destination-out';
+   const g=x.createRadialGradient(px,py,Math.min(radius-.01,Math.max(.75,radius*(1-soft))),px,py,radius);
+   g.addColorStop(0,'rgba(0,0,0,1)');g.addColorStop(1,'rgba(0,0,0,0)');
+   x.fillStyle=g;x.beginPath();x.arc(px,py,radius,0,Math.PI*2);x.fill();x.restore();
+  }else if(mode==='restore'&&currentImg){
+   // A clipped draw with globalAlpha < 1 never fully restores deleted pixels,
+   // and drawing the original directly ignores the requested feathered boundary.
+   const left=Math.max(0,Math.floor(px-radius-1)),top=Math.max(0,Math.floor(py-radius-1));
+   const right=Math.min(c.width,Math.ceil(px+radius+1)),bottom=Math.min(c.height,Math.ceil(py+radius+1));
+   const width=right-left,height=bottom-top;if(width<1||height<1)return;
+   brushTile.width=width;brushTile.height=height;
+   const tx=brushTile.getContext('2d');tx.drawImage(currentImg,left,top,width,height,0,0,width,height);
+   tx.globalCompositeOperation='destination-in';
+   const g=tx.createRadialGradient(px-left,py-top,Math.min(radius-.01,Math.max(.75,radius*(1-soft))),px-left,py-top,radius);
+   g.addColorStop(0,'rgba(255,255,255,1)');g.addColorStop(1,'rgba(255,255,255,0)');
+   tx.fillStyle=g;tx.fillRect(0,0,width,height);tx.globalCompositeOperation='source-over';
+   x.drawImage(brushTile,left,top);
+  }
+ }
+ const paint=e=>{
+  if(bgPointer!==e.pointerId)return;
+  const r=c.getBoundingClientRect();if(!r.width||!r.height)return;
+  const px=(e.clientX-r.left)*c.width/r.width,py=(e.clientY-r.top)*c.height/r.height;
+  const radius=Math.max(1,Number($('bgBrushSize')?.value||36)*c.width/Math.max(1,r.width)/2);
+  const soft=Math.max(0,Math.min(1,Number($('bgBrushSoft')?.value||35)/100));
+  const mode=$('bgBrushMode')?.value||'erase';
+  const from=previousPoint||{x:px,y:py};const distance=Math.hypot(px-from.x,py-from.y);
+  const steps=Math.max(1,Math.min(48,Math.ceil(distance/Math.max(1,radius*.45))));
+  for(let i=1;i<=steps;i++)brushStamp(from.x+(px-from.x)*i/steps,from.y+(py-from.y)*i/steps,radius,soft,mode);
+  previousPoint={x:px,y:py};preparedResultBlob=null;updateBgBlob();
+ };
+ c.onpointerdown=e=>{bgPointer=e.pointerId;previousPoint=null;c.setPointerCapture?.(e.pointerId);paint(e)};
+ c.onpointermove=paint;c.onpointerup=c.onpointercancel=()=>{bgPointer=null;previousPoint=null;brushTile.width=brushTile.height=1};applyBgPreviewMode();
+}
+function applyBgPreviewMode(){const stage=$('afterStage');if(!stage)return;stage.dataset.bgPreview=$('bgPreviewMode')?.value||'checker'}
+let bgBlobTimer=0,bgBlobRun=0;
+function updateBgBlob(){
+ const run=++bgBlobRun;clearTimeout(bgBlobTimer);preparedResultBlob=null;
+ const button=$('finalImageDownload');if(button)button.disabled=true;
+ bgBlobTimer=setTimeout(async()=>{
+  if(!bgEditCanvas||run!==bgBlobRun)return;
+  try{
+   const canvas=bgEditCanvas,blob=await blobFromCanvas(canvas,'image/png');
+   if(run!==bgBlobRun||bgEditCanvas!==canvas)return;
+   if(!blob||blob.size<120)throw Error('Refined PNG is empty.');
+   await verifyTransparentBlob(blob);
+   if(run!==bgBlobRun||bgEditCanvas!==canvas)return;
+   preparedResultBlob=blob;preparedResultType='image/png';preparedResultName=outName('image-bg-remove','image/png');
+   if($('afterMeta'))$('afterMeta').textContent=`${canvas.width} × ${canvas.height} • ${humanSize(blob.size)} • refined PNG`;
+   if(button)button.disabled=false;
+  }catch(e){if(run===bgBlobRun)setStatus('Could not prepare refined PNG: '+(e?.message||e))}
+ },120);
+}
+$('bgPreviewMode')?.addEventListener('change',applyBgPreviewMode);
+async function verifyTransparentBlob(blob){
+ if(!(blob instanceof Blob)||blob.size<120)throw Error('Output file is missing or empty.');
+ const bm=await createImageBitmap(blob);try{const c=document.createElement('canvas');c.width=64;c.height=64;const x=c.getContext('2d',{willReadFrequently:true});x.drawImage(bm,0,0,64,64);const st=canvasAlphaStats(c);if(st.visible<.015||st.clear<.012)throw Error('PNG verification detected blank or opaque output. Download disabled.');}finally{bm.close?.();}
+}
+async function metadataSignals(fileOrBlob){const b=new Uint8Array(await fileOrBlob.arrayBuffer()),sig=[];if(b[0]===0xff&&b[1]===0xd8){let i=2;while(i+4<b.length&&b[i]===0xff){const m=b[i+1],len=(b[i+2]<<8)|b[i+3];if(m===0xe1)sig.push('EXIF/XMP (APP1)');if(m===0xed)sig.push('IPTC (APP13)');if(!len||m===0xda)break;i+=2+len}}else if(b[0]===0x89&&b[1]===0x50&&b[2]===0x4e&&b[3]===0x47){let i=8;while(i+12<=b.length){const len=(b[i]<<24)|(b[i+1]<<16)|(b[i+2]<<8)|b[i+3],t=String.fromCharCode(...b.slice(i+4,i+8));if(['eXIf','tEXt','zTXt','iTXt'].includes(t))sig.push(t);i+=12+Math.max(0,len);if(t==='IEND')break}}return[...new Set(sig)]}
+async function downloadCurrent(){let bgRequest=0;try{
+ if(id==='print-size'){const w=Number($('printW').value),h=Number($('printH').value),dpi=Number($('printDpi').value);if(!w||!h||!dpi)throw Error('Enter valid values.');$('status').innerHTML=`<strong>${(w/dpi).toFixed(2)} × ${(h/dpi).toFixed(2)} inches</strong><br>${(w/dpi*2.54).toFixed(2)} × ${(h/dpi*2.54).toFixed(2)} cm at ${dpi} DPI`;return}
+ if(id==='image-base64')return convertBase64();
+ if(id==='base64-image')return decodeBase64();
+ if(!currentImg)throw Error('Please select an image first.');if(id==='image-convert'&&/image\/(gif|webp)/i.test(currentFile?.type||'')&&!$('allowFirstFrame')?.checked)throw Error('GIF/WebP may be animated. DoKitly will not silently flatten animation. Check “extract only the first frame” to continue intentionally.');let type=selectedType(id==='image-bg-remove'),blob,c;
+ if(id==='image-watermark'&&wmMode==='remove'){if(!wmMaskHasPixels())wmAutoDetect();clearTimeout(wmLiveTimer);wmLiveTimer=0;if(!wmMaskHasPixels())throw Error('Watermark was not detected. Use Select Area and draw one box around it.');setStatus('Reconstructing the watermark area at full resolution…');c=wmBuildResult(true);type=selectedType(false);blob=await blobFromCanvas(c,type,quality());preparedResultBlob=blob;preparedResultType=type;preparedResultName='DoKitly_Watermark_Studio_Removed.'+extForType(type);showCanvasPreview(c,`${c.width} × ${c.height} • ${humanSize(blob.size)}`);showCompareSlider(c);if($('finalImageDownload'))$('finalImageDownload').disabled=false;setStatus('Full-resolution cleaned result prepared. Inspect details before downloading.','Processed:');return}
+ if(id==='image-bg-remove'){
+  clearBgComparison();
+  bgRequest=++bgProcessRun;
+  window.DoKitlyBackgroundAI?.cancel?.();resetBgCompareControls();
+  const source=currentImg;
+  preparedResultBlob=null;preparedResultName=null;bgEditCanvas=null;
+  $('bgRefine')?.setAttribute('hidden','');
+  if($('finalImageDownload'))$('finalImageDownload').disabled=true;
+  setStatus('Removing background automatically…');
+  const result=await autoRemoveBackground(source,bgRequest);
+  if(bgRequest!==bgProcessRun||currentImg!==source)return;
+  c=result.canvas;type='image/png';blob=await blobFromCanvas(c,type);
+  if(bgRequest!==bgProcessRun||currentImg!==source)return;
+  await verifyTransparentBlob(blob);
+  if(bgRequest!==bgProcessRun||currentImg!==source)return;
+  preparedResultBlob=blob;preparedResultType=type;preparedResultName=outName(id,type);
+  bindBgEditor(c);
+  if($('finalImageDownload')){$('finalImageDownload').disabled=false;$('finalImageDownload').scrollIntoView?.({behavior:'smooth',block:'nearest'})}
+  setStatus(`${result.method} processed. Review the result, then download the transparent PNG.`,'Processed:');return
+ }
+
+ if(id==='image-passport'){c=drawVisual(true);const bg=$('passportBg')?.value||'keep';if(bg!=='keep'){setStatus('Detecting subject and replacing background…');c=await removePersonBackground(c,bg)}type=selectedType(false);const target=Number($('passportTargetKB')?.value||0);if(target>0&&type!=='image/png'){const limit=target*1024;let lo=.02,hi=.98,hit=null;for(let i=0;i<12;i++){const q=(lo+hi)/2,b=await blobFromCanvas(c,type,q);if(b.size<=limit){hit=b;lo=q}else hi=q}blob=hit||await blobFromCanvas(c,type,.02)}else blob=await blobFromCanvas(c,type,quality());preparedResultBlob=blob;preparedResultType=type;preparedResultName=outName(id,type);showCanvasPreview(c,`${c.width} × ${c.height} • ${humanSize(blob.size)}`);if($('finalImageDownload'))$('finalImageDownload').disabled=false;setStatus('Passport photo processed. Review framing/background, then download.','Processed:');return}
+ if(id==='image-target'){const kb=$('targetSelect').value==='custom'?Number($('targetCustom').value):Number($('targetSelect').value);if(!kb)throw Error('Enter a target size.');if($('processBtn')){$('processBtn').disabled=true;$('processBtn').textContent='Compressing…'};const r=await compressToKB(kb,type,true);if($('processBtn')){$('processBtn').disabled=false;$('processBtn').textContent='Compress Image'};if(!r.blob)throw Error('Could not create a compressed result.');targetResultBlob=r.blob;targetResultType=type;if($('targetDownloadBtn'))$('targetDownloadBtn').disabled=false;showCanvasPreview(r.canvas,`${r.canvas.width} × ${r.canvas.height} • ${humanSize(r.blob.size)}`);setStatus(r.miss?`Closest result: ${humanSize(r.blob.size)}. Target ${kb} KB could not be reached without making the image extremely small.`:`Target: ${kb} KB • Result: ${humanSize(r.blob.size)}`,'Compressed:');return}
+ c=drawVisual(true);if(!c)throw Error('Could not create a result.');if(id==='image-compress'&&Number($('targetKB')?.value)>0){const r=await compressToKB(Number($('targetKB').value),type,true);blob=r.blob;c=r.canvas}else blob=await blobFromCanvas(c,type,quality());const keptOriginal=id==='image-compress'&&currentFile&&currentFile.type===type&&blob.size>=currentFile.size;if(keptOriginal)blob=currentFile;if(id==='image-exif'){const remain=await metadataSignals(blob);if(remain.length)throw Error(`Metadata verification found remaining container(s): ${remain.join(', ')}. Download blocked.`)}preparedResultBlob=blob;preparedResultType=type;preparedResultName=outName(id,type);showCanvasPreview(c,`${c.width} × ${c.height} • ${humanSize(blob.size)}`);if($('finalImageDownload'))$('finalImageDownload').disabled=false;setStatus(keptOriginal?'Already optimized: re-encoding would make this file larger, so the original bytes were preserved (0% saved).':`${humanSize(currentFile.size)} → ${humanSize(blob.size)}. Review preview, then download.`,'Processed:')
+ }catch(e){if(id==='image-bg-remove'){if(bgRequest&&bgRequest!==bgProcessRun)return;preparedResultBlob=null;preparedResultName=null;if($('finalImageDownload'))$('finalImageDownload').disabled=true;}setStatus(e.message)}}
+
+async function convertBase64(){if(!currentFile)throw Error('Please select an image first.');const bytes=new Uint8Array(await currentFile.arrayBuffer());let binary='';const CHUNK=0x8000;for(let i=0;i<bytes.length;i+=CHUNK)binary+=String.fromCharCode(...bytes.subarray(i,i+CHUNK));const b64=btoa(binary),mime=currentFile.type&&currentFile.type.startsWith('image/')?currentFile.type:'application/octet-stream',val=`data:${mime};base64,${b64}`;const decoded=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));if(decoded.length!==bytes.length)throw Error('Base64 verification failed: decoded size differs.');for(let i=0;i<bytes.length;i++){if(decoded[i]!==bytes[i])throw Error(`Base64 verification failed at byte ${i}.`)}$('base64Out').value=val;$('copyBtn').disabled=false;$('saveBase64Btn').disabled=false;$('openVerifiedBtn').disabled=false;$('base64Count').textContent=`• ${val.length.toLocaleString()} chars • ${decoded.length.toLocaleString()} bytes verified`;if(verifiedBlobURL)URL.revokeObjectURL(verifiedBlobURL);verifiedBlobURL=URL.createObjectURL(new Blob([decoded],{type:mime}));$('afterStage').innerHTML=`<img src="${verifiedBlobURL}" alt="Verified decoded image">`;$('afterMeta').textContent=`${decoded.length.toLocaleString()} bytes • exact match`;setStatus('Decoded bytes match the uploaded file exactly. Use “Open verified image” instead of pasting a huge Data URL into Chrome’s address bar.','Verified:')}
+async function decodeBase64(){let val=$('base64In').value.trim().replace(/\s+/g,'');const m=val.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);if(!m)throw Error('Paste a complete data:image/...;base64,... URL.');let bin;try{bin=atob(m[2])}catch{throw Error('Invalid Base64 data.')}const bytes=Uint8Array.from(bin,c=>c.charCodeAt(0)),blob=new Blob([bytes],{type:m[1]});if(verifiedBlobURL)URL.revokeObjectURL(verifiedBlobURL);verifiedBlobURL=URL.createObjectURL(blob);const im=new Image();im.onload=()=>{$('afterStage').innerHTML=`<img src="${verifiedBlobURL}" alt="Decoded image">`;$('afterMeta').textContent=`${im.width} × ${im.height} • ${humanSize(blob.size)}`;setStatus('Base64 decoded successfully.','Done:')};im.onerror=()=>setStatus('The Base64 decoded, but it is not a valid image.');im.src=verifiedBlobURL}
+$('copyBtn')?.addEventListener('click',async()=>{const v=$('base64Out').value;if(!v)return;try{await navigator.clipboard.writeText(v);setStatus(`Copied all ${v.length.toLocaleString()} characters.`,'Copied:')}catch{$('base64Out').focus();$('base64Out').select();const ok=document.execCommand('copy');setStatus(ok?`Copied all ${v.length.toLocaleString()} characters.`:'Clipboard copy was blocked. Use Save .txt instead.')}});
+$('saveBase64Btn')?.addEventListener('click',()=>{const v=$('base64Out').value;if(!v)return;const u=URL.createObjectURL(new Blob([v],{type:'text/plain;charset=utf-8'})),a=document.createElement('a');a.href=u;a.download='DoKitly_Base64.txt';a.click();setTimeout(()=>URL.revokeObjectURL(u),1500)});
+$('openVerifiedBtn')?.addEventListener('click',()=>{if(verifiedBlobURL)window.open(verifiedBlobURL,'_blank','noopener')});
+$('autoFaceBtn')?.addEventListener('click',async()=>{if(!currentImg){setStatus('Select an image first.');return}if(!('FaceDetector' in window)){setStatus('Automatic face detection is not supported in this browser. Use Zoom and Up/Down controls manually.');return}try{setStatus('Detecting face…');const fd=new FaceDetector({fastMode:true,maxDetectedFaces:1}),faces=await fd.detect(currentImg);if(!faces.length)throw Error('No clear face detected.');const b=faces[0].boundingBox,cx=b.x+b.width/2,cy=b.y+b.height/2;$('passportX').value=Math.round(Math.max(-100,Math.min(100,(.5-cx/currentImg.width)*115)));$('passportY').value=Math.round(Math.max(-100,Math.min(100,(.34-cy/currentImg.height)*125)));$('passportZoom').value=Math.round(Math.max(90,Math.min(180,135/(b.height/currentImg.height*3.2))));['passportX','passportY','passportZoom'].forEach(k=>$(k).dispatchEvent(new Event('input',{bubbles:true})));setStatus('Face centered. Fine-tune zoom/position if needed.','Auto:')}catch(e){setStatus(e.message||'Could not detect face.')}});
+
+ // Experimental dual-mask fusion. Only operates on actual Fast+Detail results
+ // already generated for Compare. No additional network/model invocation.
+ // Preserve high-confidence Fast interiors, use conservative alpha near edges.
+ function bgFuseAlpha(fast,detail,w,h,protect=7){
+  const n=w*h;if(fast.length!==n||detail.length!==n)throw Error('Incompatible AI masks');
+  const dist=new Float32Array(n),huge=w+h,diag=Math.SQRT2;
+  for(let i=0;i<n;i++)dist[i]=fast[i]>245?huge:0;
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+   const i=y*w+x; if(x)dist[i]=Math.min(dist[i],dist[i-1]+1);
+   if(y){dist[i]=Math.min(dist[i],dist[i-w]+1);
+    if(x)dist[i]=Math.min(dist[i],dist[i-w-1]+diag);
+    if(x+1<w)dist[i]=Math.min(dist[i],dist[i-w+1]+diag);}
+  }
+  for(let y=h-1;y>=0;y--)for(let x=w-1;x>=0;x--){
+   const i=y*w+x;if(x+1<w)dist[i]=Math.min(dist[i],dist[i+1]+1);
+   if(y+1<h){dist[i]=Math.min(dist[i],dist[i+w]+1);
+    if(x)dist[i]=Math.min(dist[i],dist[i+w-1]+diag);
+    if(x+1<w)dist[i]=Math.min(dist[i],dist[i+w+1]+diag);}
+  }
+  const fused=new Uint8Array(n);
+  for(let i=0;i<n;i++)fused[i]=dist[i]>protect?fast[i]:Math.min(fast[i],detail[i]);
+  return fused;
+ }
+ async function bgBalancedCanvas(fastBlob,detailBlob){
+  let fb=null,db=null,fc=null,dc=null,matte=null,out=null;
+  try{
+   [fb,db]=await Promise.all([createImageBitmap(fastBlob),createImageBitmap(detailBlob)]);
+   if(fb.width!==db.width||fb.height!==db.height)throw Error('Compare images have different dimensions');
+   const w=fb.width,h=fb.height,scale=Math.min(1,1024/Math.max(w,h));
+   const mw=Math.max(1,Math.round(w*scale)),mh=Math.max(1,Math.round(h*scale)),n=mw*mh;
+   fc=document.createElement('canvas');fc.width=mw;fc.height=mh;
+   dc=document.createElement('canvas');dc.width=mw;dc.height=mh;
+   const fx=fc.getContext('2d',{willReadFrequently:true}),dx=dc.getContext('2d',{willReadFrequently:true});
+   fx.drawImage(fb,0,0,mw,mh);dx.drawImage(db,0,0,mw,mh);
+   const fd=fx.getImageData(0,0,mw,mh).data,dd=dx.getImageData(0,0,mw,mh).data;
+   const fa=new Uint8Array(n),da=new Uint8Array(n);
+   for(let i=0,j=3;i<n;i++,j+=4){fa[i]=fd[j];da[i]=dd[j];}
+   const fused=bgFuseAlpha(fa,da,mw,mh);
+   matte=document.createElement('canvas');matte.width=mw;matte.height=mh;
+   const mx=matte.getContext('2d',{willReadFrequently:true}),md=mx.createImageData(mw,mh);
+   for(let i=0,j=0;i<n;i++,j+=4){md.data[j]=md.data[j+1]=md.data[j+2]=255;md.data[j+3]=fused[i];}
+   mx.putImageData(md,0,0);
+   out=document.createElement('canvas');out.width=w;out.height=h;
+   const ox=out.getContext('2d',{willReadFrequently:true});ox.drawImage(fb,0,0);
+   // Large photographs use bounded 128-row scratch buffers instead of
+   // allocating additional original-resolution RGBA arrays.
+   const strip=document.createElement('canvas');strip.width=w;
+   try{
+    for(let top=0;top<h;top+=128){
+     const rows=Math.min(128,h-top);strip.height=rows;
+     const sx=strip.getContext('2d',{willReadFrequently:true});
+     sx.imageSmoothingEnabled=true;sx.imageSmoothingQuality='high';
+     sx.drawImage(matte,0,-top,w,h);
+     const a=sx.getImageData(0,0,w,rows).data,base=ox.getImageData(0,top,w,rows);
+     for(let j=3;j<a.length;j+=4)base.data[j]=Math.min(base.data[j],a[j]);
+     ox.putImageData(base,0,top);
+    }
+   }finally{strip.width=strip.height=1;}
+   return out;
+  }catch(e){if(out)out.width=out.height=1;throw e;}
+  finally{fb?.close?.();db?.close?.();for(const c of [fc,dc,matte])if(c)c.width=c.height=1;}
+ }
+ // Optional model comparison: both results use the same source image, stay
+ // local, and remain separate until the user explicitly chooses one.
+ function renderBgComparison(){
+  const panel=$('bgComparePanel'),grid=$('bgCompareGrid');if(!panel||!grid)return;
+  grid.textContent='';
+  for(const model of ['fast','detail','balanced']){
+   const item=bgCompareResults[model];if(!item)continue;
+   const section=document.createElement('section');section.className='dk-bg-compare-option';section.dataset.model=model;
+   const title=document.createElement('strong');title.textContent=model==='fast'?'Fast · U2NetP':model==='detail'?'Detail · Silueta':'Balanced · experimental (both masks)';
+   const preview=document.createElement('img');preview.src=item.url;preview.alt=title.textContent+' transparent PNG preview';preview.loading='eager';
+   const choose=document.createElement('button');choose.type='button';choose.className='btn-secondary';choose.textContent='Use '+(model==='fast'?'Fast':model==='detail'?'Detail':'Balanced')+' result';
+   choose.addEventListener('click',()=>selectBgComparison(model));
+   section.append(title,preview,choose);grid.append(section);
+  }
+  panel.hidden=!grid.childElementCount;
+  const both=$('bgCompareDownloadBoth');if(both)both.disabled=!(bgCompareResults.fast&&bgCompareResults.detail);
+ }
+ // A comparison card is only ~180px high. Decode a modest preview in that
+ // card, not a second full-resolution PNG; keep the original blob unchanged
+ // for Refine, full-size export, and reproducible Fast-vs-Detail comparisons.
+ async function bgComparisonPreview(canvas){
+  const longest=Math.max(canvas.width,canvas.height);if(longest<=960)return null;
+  const scale=960/longest,small=document.createElement('canvas');
+  small.width=Math.max(1,Math.round(canvas.width*scale));
+  small.height=Math.max(1,Math.round(canvas.height*scale));
+  try{const ctx=small.getContext('2d');ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';ctx.drawImage(canvas,0,0,small.width,small.height);return await blobFromCanvas(small,'image/png');}
+  finally{small.width=small.height=1;}
+ }
+ async function selectBgComparison(model){
+  const item=bgCompareResults[model],source=currentImg;if(!item||!source)return;
+  const run=++bgProcessRun;
+  // Fast can be selected while the heavier Detail model is still running.
+  // Stop its worker immediately instead of burning CPU/download resources.
+  if(bgCompareActiveRun){window.DoKitlyBackgroundAI?.cancel?.();resetBgCompareControls();}
+  preparedResultBlob=null;preparedResultName=null;preparedResultType=null;
+  if($('finalImageDownload'))$('finalImageDownload').disabled=true;
+  let bitmap=null,c=null;
+  try{
+   bitmap=await createImageBitmap(item.blob);
+   if(run!==bgProcessRun||currentImg!==source)return;
+   c=document.createElement('canvas');c.width=bitmap.width;c.height=bitmap.height;
+   c.getContext('2d').drawImage(bitmap,0,0);
+   bitmap.close?.();bitmap=null;
+   if(run!==bgProcessRun||currentImg!==source){c.width=c.height=1;return;}
+   $('bgModel').value=model==='balanced'?'fast':model;
+   bgEditCanvas=null;++bgBlobRun;clearTimeout(bgBlobTimer);
+   preparedResultBlob=item.blob;preparedResultType='image/png';preparedResultName=model==='balanced'?'DoKitly_Background_Remover_Balanced_Experimental.png':outName('image-bg-remove','image/png');
+   bindBgEditor(c);
+   for(const option of $('bgCompareGrid').children)option.classList.toggle('dk-bg-chosen',option.dataset.model===model);
+   if($('finalImageDownload'))$('finalImageDownload').disabled=false;
+   setStatus((model==='fast'?'Fast':model==='detail'?'Detail':'Experimental Balanced')+' result selected. Refine edges if needed, then download.','Selected:');
+  }catch(e){if(run===bgProcessRun)setStatus('Could not open comparison result: '+(e?.message||e));if(c&&bgEditCanvas!==c)c.width=c.height=1}
+  finally{bitmap?.close?.();}
+ }
+ async function compareBgModels(){
+  const source=currentImg;if(!source){setStatus('Select an image to compare first.');return;}
+  const run=++bgProcessRun;
+  window.DoKitlyBackgroundAI?.cancel?.();resetBgCompareControls();clearBgComparison();
+  bgCompareActiveRun=run;
+  bgEditCanvas=null;++bgBlobRun;clearTimeout(bgBlobTimer);
+  preparedResultBlob=null;preparedResultName=null;preparedResultType=null;
+  $('bgRefine')?.setAttribute('hidden','');
+  if($('finalImageDownload'))$('finalImageDownload').disabled=true;
+  const compareBtn=$('bgCompareBtn'),processBtn=$('processBtn'),cancelBtn=$('bgCancelCompareBtn');
+  if(cancelBtn)cancelBtn.hidden=false;
+  if(compareBtn)compareBtn.disabled=true;if(processBtn)processBtn.disabled=true;
+  const problems=[];
+  try{
+   for(const model of ['fast','detail']){
+    if(run!==bgProcessRun||currentImg!==source)return;
+    setStatus('Comparing '+(model==='fast'?'Fast':'Detail')+' engine…');
+    let result=null;
+    try{
+     result=await autoRemoveBackground(source,run,model);
+     if(run!==bgProcessRun||currentImg!==source)return;
+     const blob=await blobFromCanvas(result.canvas,'image/png');
+     if(run!==bgProcessRun||currentImg!==source)return;
+     await verifyTransparentBlob(blob);
+     if(run!==bgProcessRun||currentImg!==source)return;
+     let previewBlob=null;try{previewBlob=await bgComparisonPreview(result.canvas)}catch(_){/* Keep verified full-size output available. */}
+     if(run!==bgProcessRun||currentImg!==source)return;
+     const url=URL.createObjectURL(previewBlob||blob);bgCompareURLs.push(url);
+     bgCompareResults[model]={blob,url};renderBgComparison();
+    }catch(e){if(run!==bgProcessRun||currentImg!==source)return;problems.push((model==='fast'?'Fast':'Detail')+': '+(e?.message||e));}
+    finally{if(result?.canvas){result.canvas.width=result.canvas.height=1;}}
+   }
+   if(run!==bgProcessRun||currentImg!==source)return;
+   // Extra output from the two verified masks, never a substitute for the
+   // original Fast/Detail outputs. Fail open if fusion is unavailable.
+   if(bgCompareResults.fast&&bgCompareResults.detail){
+    let balanced=null;
+    try{
+     balanced=await bgBalancedCanvas(bgCompareResults.fast.blob,bgCompareResults.detail.blob);
+     if(run!==bgProcessRun||currentImg!==source)return;
+     const blob=await blobFromCanvas(balanced,'image/png');
+     if(run!==bgProcessRun||currentImg!==source)return;
+     await verifyTransparentBlob(blob);
+     if(run!==bgProcessRun||currentImg!==source)return;
+     let previewBlob=null;try{previewBlob=await bgComparisonPreview(balanced)}catch(_){}
+     if(run!==bgProcessRun||currentImg!==source)return;
+     const url=URL.createObjectURL(previewBlob||blob);bgCompareURLs.push(url);
+     bgCompareResults.balanced={blob,url};renderBgComparison();
+    }catch(e){if(run===bgProcessRun)problems.push('Experimental Balanced: '+(e?.message||e));}
+    finally{if(balanced)balanced.width=balanced.height=1;}
+   }
+   if(run!==bgProcessRun||currentImg!==source)return;
+   if(Object.keys(bgCompareResults).length){
+    setStatus('Compare the available outputs (including optional experimental Balanced) and choose one to Refine/Download.'+(problems.length?' '+problems.join(' | '):''),'Ready:');
+   }else setStatus('Neither model produced a valid result. '+problems.join(' | '));
+  }finally{
+   // An older async request must never change the controls for a newer run.
+   if(run===bgProcessRun&&bgCompareActiveRun===run)resetBgCompareControls();
+  }
+ }
+ $('bgCompareDownloadBoth')?.addEventListener('click',async()=>{
+  const fast=bgCompareResults.fast,detail=bgCompareResults.detail,source=currentImg,run=bgProcessRun;
+  if(!fast||!detail||!source)return;
+  const button=$('bgCompareDownloadBoth');button.disabled=true;
+  try{
+   const files=[
+    {name:'DoKitly_Background_Remover_Fast.png',blob:fast.blob},
+    {name:'DoKitly_Background_Remover_Detail.png',blob:detail.blob}
+   ];
+   if(bgCompareResults.balanced)files.push({name:'DoKitly_Background_Remover_Balanced_Experimental.png',blob:bgCompareResults.balanced.blob});
+   const zip=await makeZipFromBlobs(files);
+   if(run!==bgProcessRun||source!==currentImg||bgCompareResults.fast!==fast||bgCompareResults.detail!==detail)return;
+   await triggerDownload(zip,'DoKitly_Background_Remover_Fast_vs_Detail.zip');
+   setStatus('Full-resolution PNG results packaged, including experimental Balanced when available. Inspect each cutout.','Ready:');
+  }catch(e){if(run===bgProcessRun)setStatus('Could not export both results: '+(e?.message||e));}
+  finally{if(button&&bgCompareResults.fast&&bgCompareResults.detail)button.disabled=false;}
+ });
+ $('bgCompareBtn')?.addEventListener('click',()=>{compareBgModels().catch(e=>setStatus(e?.message||String(e)))});
+ $('bgCancelCompareBtn')?.addEventListener('click',()=>{++bgProcessRun;window.DoKitlyBackgroundAI?.cancel?.();resetBgCompareControls();clearBgComparison();preparedResultBlob=null;preparedResultName=null;preparedResultType=null;if($('finalImageDownload'))$('finalImageDownload').disabled=true;setStatus('Comparison cancelled. No result was selected.');});
+$('bgModel')?.addEventListener('change',()=>{
+  clearBgComparison();
+ // A result belongs to the model that generated it. Never offer a stale Fast
+ // download after the user has switched to Detail (or the reverse).
+ ++bgProcessRun;window.DoKitlyBackgroundAI?.cancel?.();resetBgCompareControls();
+ preparedResultBlob=null;preparedResultName=null;preparedResultType=null;
+ bgEditCanvas=null;bgPointer=null;++bgBlobRun;clearTimeout(bgBlobTimer);
+ $('bgRefine')?.setAttribute('hidden','');
+ if($('finalImageDownload'))$('finalImageDownload').disabled=true;
+ if($('afterStage'))$('afterStage').textContent='Select Remove Background to process with the selected model.';
+ if($('afterMeta'))$('afterMeta').textContent='No result for selected model';
+ if(currentImg)setStatus('AI model changed. Choose Remove Background to process a new result.');
+});
+$('bgResetBtn')?.addEventListener('click',()=>{$('fileInput')?.click()});
+$('processBtn')?.addEventListener('click',()=>{if(id==='multi-resize'||id==='multi-compress')processBatch();else downloadCurrent()});$('cancelBatchBtn')?.addEventListener('click',()=>{batchCancelled=true});$('retryBatchBtn')?.addEventListener('click',()=>processBatch(true));
+$('targetDownloadBtn')?.addEventListener('click',()=>{if(!targetResultBlob||!targetResultType){setStatus('Compress the image first.');return}triggerDownload(targetResultBlob,outName('image-target',targetResultType));setStatus(`Downloaded ${humanSize(targetResultBlob.size)} image.`,'Downloaded:')});
+$('finalImageDownload')?.addEventListener('click',()=>{const blob=batchZipBlob||preparedResultBlob;if(!blob){setStatus('Process the result first.');return}setStatus('Opening your download page…');triggerDownload(blob,preparedResultName||outName(id,preparedResultType||selectedType(id==='image-bg-remove'))).catch(e=>setStatus(e.message||'Download could not start.'))});
+if(id==='image-target'){['targetSelect','targetCustom','format'].forEach(k=>$(k)?.addEventListener('change',()=>{targetResultBlob=null;targetResultType=null;if($('targetDownloadBtn'))$('targetDownloadBtn').disabled=true}));}
+
+function bindColorCanvas(img){const stage=$('beforeStage');if(!stage)return;const c=document.createElement('canvas'),max=260,sc=Math.min(1,max/Math.max(img.width,img.height));c.width=Math.round(img.width*sc);c.height=Math.round(img.height*sc);const x=c.getContext('2d');x.drawImage(img,0,0,c.width,c.height);stage.innerHTML='';stage.appendChild(c);c.style.cursor='crosshair';c.onclick=e=>{const r=c.getBoundingClientRect(),px=Math.floor((e.clientX-r.left)*c.width/r.width),py=Math.floor((e.clientY-r.top)*c.height/r.height),d=x.getImageData(px,py,1,1).data,hex='#'+[d[0],d[1],d[2]].map(v=>v.toString(16).padStart(2,'0')).join('').toUpperCase();$('swatch').style.background=hex;$('hexOut').textContent=hex;$('rgbOut').textContent=`RGB ${d[0]}, ${d[1]}, ${d[2]}`}}
+
+const crcTable=(()=>{let t=[];for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=(c&1)?0xedb88320^(c>>>1):c>>>1;t[n]=c>>>0}return t})();
+function crc32(u8){let c=0xffffffff;for(const b of u8)c=crcTable[(c^b)&255]^(c>>>8);return(c^0xffffffff)>>>0}function le16(n){return[n&255,(n>>>8)&255]}function le32(n){return[n&255,(n>>>8)&255,(n>>>16)&255,(n>>>24)&255]}
+
+// ZIP32 store-mode package for full-resolution comparison exports. Compute
+// CRC in bounded slices and reuse Blob data, rather than duplicating both
+// large PNGs in JS typed arrays (the ordinary batch ZIP path is unchanged).
+async function makeZipFromBlobs(files){
+ const enc=new TextEncoder(),parts=[],central=[];let offset=0;
+ for(const f of files){
+  if(!(f.blob instanceof Blob))throw Error('Missing PNG output.');
+  const name=enc.encode(f.name),size=f.blob.size;
+  if(size>0xffffffff||name.length>65535||offset+30+name.length+size>0xffffffff)throw Error('ZIP32 size exceeded; download each PNG separately.');
+  let state=0xffffffff;
+  for(let start=0;start<size;start+=524288){
+   const data=new Uint8Array(await f.blob.slice(start,Math.min(size,start+524288)).arrayBuffer());
+   for(const v of data)state=crcTable[(state^v)&255]^(state>>>8);
+  }
+  const crc=(state^0xffffffff)>>>0;
+  const local=new Uint8Array([...le32(0x04034b50),...le16(20),...le16(0),...le16(0),...le16(0),...le16(0),...le32(crc),...le32(size),...le32(size),...le16(name.length),...le16(0),...name]);
+  parts.push(local,f.blob);
+  const cent=new Uint8Array([...le32(0x02014b50),...le16(20),...le16(20),...le16(0),...le16(0),...le16(0),...le16(0),...le32(crc),...le32(size),...le32(size),...le16(name.length),...le16(0),...le16(0),...le16(0),...le16(0),...le32(0),...le32(offset),...name]);
+  central.push(cent);offset+=local.length+size;
+ }
+ const centralSize=central.reduce((n,x)=>n+x.length,0);
+ if(offset+centralSize>0xffffffff)throw Error('ZIP32 size exceeded; download each PNG separately.');
+ const end=new Uint8Array([...le32(0x06054b50),...le16(0),...le16(0),...le16(files.length),...le16(files.length),...le32(centralSize),...le32(offset),...le16(0)]);
+ return new Blob([...parts,...central,end],{type:'application/zip'});
+}
+async function makeZip(files){const enc=new TextEncoder(),parts=[],central=[];let offset=0;for(const f of files){const name=enc.encode(f.name),data=new Uint8Array(await f.blob.arrayBuffer()),crc=crc32(data);const local=new Uint8Array([...le32(0x04034b50),...le16(20),...le16(0),...le16(0),...le16(0),...le16(0),...le32(crc),...le32(data.length),...le32(data.length),...le16(name.length),...le16(0),...name]);parts.push(local,data);const cent=new Uint8Array([...le32(0x02014b50),...le16(20),...le16(20),...le16(0),...le16(0),...le16(0),...le16(0),...le32(crc),...le32(data.length),...le32(data.length),...le16(name.length),...le16(0),...le16(0),...le16(0),...le16(0),...le32(0),...le32(offset),...name]);central.push(cent);offset+=local.length+data.length}const centralSize=central.reduce((n,a)=>n+a.length,0),end=new Uint8Array([...le32(0x06054b50),...le16(0),...le16(0),...le16(files.length),...le16(files.length),...le32(centralSize),...le32(offset),...le16(0)]);return new Blob([...parts,...central,end],{type:'application/zip'})}
+async function passportSheet(){if(id!=='image-passport'||!currentImg)return;const photo=drawVisual(true);if(!photo)throw Error('Process a passport photo first.');const dpi=Number($('dpi')?.value)||300,W=Math.round(6*dpi),H=Math.round(4*dpi),sheet=document.createElement('canvas');sheet.width=W;sheet.height=H;const x=sheet.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,W,H);const gap=Math.round(.12*dpi),cols=Math.max(1,Math.floor((W+gap)/(photo.width+gap))),rows=Math.max(1,Math.floor((H+gap)/(photo.height+gap))),count=Math.min(cols*rows,12);for(let i=0;i<count;i++){const c=i%cols,r=Math.floor(i/cols);x.drawImage(photo,c*(photo.width+gap),r*(photo.height+gap))}const blob=await blobFromCanvas(sheet,'image/jpeg',.94),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='DoKitly_Passport_Photo_Print_Sheet.jpg';a.click();setTimeout(()=>URL.revokeObjectURL(url),1500);photo.width=photo.height=sheet.width=sheet.height=1}
+$('passportSheetBtn')?.addEventListener('click',()=>passportSheet().catch(e=>setStatus(e.message)));
+async function processBatch(retry=false){try{const files=retry?batchFailed:[...($('fileInput').files||[])];if(!files.length)throw Error('Select one or more images.');batchCancelled=false;batchFailed=[];$('batchList').innerHTML='';const done=[];for(let i=0;i<files.length;i++){if(batchCancelled){setStatus(`Cancelled after ${done.length} item(s).`);break}const file=files[i];let img,url;try{({img,url}=await readImage(file));}catch(err){batchFailed.push(file);$('batchList').insertAdjacentHTML('beforeend',`<div class="batch-row"><span>${esc(file.name)} • failed</span><span>!</span></div>`);continue}let type=typeFor(file,$('format').value,false),c;if(id==='multi-resize'){const mw=Number($('batchWidth').value)||1200;let w=img.width,h=img.height;if(w>mw){h*=mw/w;w=mw}c=canvasDraw(img,w,h,type)}else c=canvasDraw(img,img.width,img.height,type);const blob=await blobFromCanvas(c,type,id==='multi-compress'?quality():.92),name=outName(id,type,i+1);done.push({name,blob});$('batchList').insertAdjacentHTML('beforeend',`<div class="batch-row"><span>${esc(name)} • ${humanSize(blob.size)}</span><span>✓</span></div>`);URL.revokeObjectURL(url);c.width=c.height=1}if($('retryBatchBtn'))$('retryBatchBtn').disabled=!batchFailed.length;if(!done.length){if(batchCancelled)return;throw Error('No files were processed successfully.')}const zip=await makeZip(done);batchZipBlob=zip;preparedResultName=`DoKitly_${(TOOL[id]?.name||'Batch_Images').replace(/[^a-z0-9]+/gi,'_')}.zip`;if($('finalImageDownload'))$('finalImageDownload').disabled=false;setStatus(`${done.length} images packed into ${preparedResultName}. Review the list, then download.`,'Processed:')}catch(e){setStatus(e.message)}}
+
+
+/* Build 6 final preview fit guard — keeps every processed image/canvas fully inside its fixed preview box. */
+(()=>{
+ const init=()=>{
+  const stage=$('afterStage');if(!stage)return;
+  const refit=()=>requestAnimationFrame(()=>fitPreviewMedia(stage));
+  new MutationObserver(refit).observe(stage,{childList:true,subtree:true});
+  if('ResizeObserver' in window)new ResizeObserver(refit).observe(stage);
+  window.addEventListener('resize',refit,{passive:true});
+  refit();
+ };
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
+})();
+
+/* Build 7 global DoKitly color selector — replaces plain browser color bars visually. */
+(()=>{
+ const swatches=['#111827','#ffffff','#2563eb','#14b8a6','#ef4444','#f59e0b','#8b5cf6','#ec4899'];
+ function enhance(input){if(!input||input.dataset.dmoColor==='1')return;input.dataset.dmoColor='1';const wrap=document.createElement('div');wrap.className='dmo-color-orb';const btn=document.createElement('button');btn.type='button';btn.className='dmo-color-orb-btn';btn.innerHTML=`<span class="dmo-color-dot"></span><b>Color</b><span>⌄</span>`;const pop=document.createElement('div');pop.className='dmo-color-pop';pop.hidden=true;swatches.forEach(c=>{const b=document.createElement('button');b.type='button';b.className='dmo-color-chip';b.style.setProperty('--chip',c);b.title=c;b.onclick=()=>{input.value=c;input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));pop.hidden=true;sync()};pop.appendChild(b)});const custom=document.createElement('label');custom.className='dmo-custom-color';custom.innerHTML='<span>＋</span>';input.parentNode.insertBefore(wrap,input);wrap.append(btn,pop);custom.appendChild(input);pop.appendChild(custom);function sync(){btn.querySelector('.dmo-color-dot').style.background=input.value;pop.querySelectorAll('.dmo-color-chip').forEach(x=>x.classList.toggle('active',x.title.toLowerCase()===input.value.toLowerCase()))}btn.onclick=()=>pop.hidden=!pop.hidden;input.addEventListener('input',sync);document.addEventListener('click',e=>{if(!wrap.contains(e.target))pop.hidden=true});sync()}
+ function scan(){document.querySelectorAll('input[type="color"]').forEach(enhance)}
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',scan,{once:true});else scan();new MutationObserver(scan).observe(document.body,{childList:true,subtree:true});
+})();
