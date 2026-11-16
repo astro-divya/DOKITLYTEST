@@ -1,0 +1,25 @@
+DoKitly Build 46 — Story & Voice Studio Test
+Status: Isolated test package; not merged into production.
+Category: Text Tools
+Reference UX: Crikk Hindi Text-to-Speech page (workflow inspiration only; no copied assets or branding).
+
+Implemented:
+- Script Studio with text input and TXT upload.
+- Local rule-based conversion to Story/Novel, Screenplay, Podcast and YouTube narration formats.
+- Speaker detection for `Character: dialogue` and `Character — dialogue`.
+- Voice Studio with per-character browser voice selection, speed/pitch, narrator selection and sequential playback.
+- Pause/resume/stop controls.
+- TXT and JSON project exports.
+- Light/dark mode and responsive layout.
+
+Not implemented / not claimed:
+- No paid AI API or remote speech service.
+- No guaranteed neural/human-like voices.
+- No MP3/WAV export. SpeechSynthesis playback cannot be represented as a downloadable audio file.
+- No AI-powered rewriting or emotion generation.
+- Voice availability and Hindi pronunciation depend on browser/OS.
+
+QA scope:
+- Static file structure and JavaScript syntax checked during packaging.
+- Real voice playback must be tested on target browsers/devices.
+- This package does not alter the live DoKitly repo or production website.

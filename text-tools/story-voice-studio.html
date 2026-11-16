@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#101a2a">
+<title>Story & Voice Studio — DoKitly</title>
+<meta name="description" content="Convert scripts into stories and play multi-character dialogue with browser voices. Free, private and browser-based.">
+<link rel="stylesheet" href="../assets/story-voice-studio.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../index.html" aria-label="DoKitly home"><span class="brand-mark">D</span><span>DoKitly</span></a>
+  <nav><a href="index.html">Text Tools</a><a href="../index.html">Test Build Home</a></nav>
+  <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">☼</button>
+</header>
+<main class="shell">
+  <div class="crumb">Text Tools <span>/</span> Story &amp; Voice Studio</div>
+  <section class="intro">
+    <div class="eyebrow"><i></i> FREE BROWSER TOOL · TEST BUILD 46</div>
+    <h1>Story <em>&amp; Voice</em> Studio</h1>
+    <p>Turn a script into a readable story, organise characters and listen to every dialogue with separate voices.</p>
+    <div class="trust"><span>✓ No account</span><span>✓ Script stays on your device</span><span>✓ No paid API</span></div>
+  </section>
+
+  <div class="modebar" role="tablist" aria-label="Studio modes">
+    <button class="mode active" data-mode="studio" role="tab" aria-selected="true">✎ Script Studio</button>
+    <button class="mode" data-mode="voices" role="tab" aria-selected="false">♫ Voice Studio</button>
+  </div>
+
+  <section class="workspace" id="studioPanel">
+    <div class="section-head">
+      <div><div class="kicker">01 / WRITE &amp; CONVERT</div><h2>Your script</h2><p>Paste a script or upload a plain-text file. Use <code>Character: dialogue</code> to identify speakers.</p></div>
+      <label class="upload secondary">↑ Upload TXT<input id="fileInput" type="file" accept=".txt,.md,text/plain"></label>
+    </div>
+    <div class="editor-toolbar">
+      <label>Input format<select id="inputFormat"><option value="auto">Auto detect</option><option value="script">Dialogue script</option><option value="story">Story / novel</option></select></label>
+      <label>Convert to<select id="outputFormat"><option value="story">Story / Novel</option><option value="screenplay">Screenplay</option><option value="podcast">Podcast script</option><option value="youtube">YouTube narration</option></select></label>
+      <label>Language<select id="language"><option value="hi-IN">Hindi</option><option value="en-IN">English (India)</option><option value="en-US">English (US)</option><option value="bn-IN">Bengali</option><option value="mr-IN">Marathi</option><option value="ta-IN">Tamil</option><option value="te-IN">Telugu</option></select></label>
+    </div>
+    <div class="editor-grid">
+      <div class="editor-col">
+        <div class="editor-label"><span>INPUT SCRIPT</span><span id="charCount">0 characters</span></div>
+        <textarea id="scriptInput" spellcheck="true" placeholder="उदाहरण:
+
+आर्यन: तुम यहाँ इतनी रात को क्या कर रही हो?
+मीरा: तुम्हारा इंतज़ार कर रही थी। मुझे तुमसे कुछ ज़रूरी बात करनी है।
+आर्यन: ठीक है, बताओ। क्या हुआ?
+
+या अपनी कहानी यहाँ paste करें..."></textarea>
+        <div class="editor-foot"><span>Tip: हर dialogue नई line में लिखें।</span><button class="text-btn" id="clearInput">Clear text</button></div>
+      </div>
+      <div class="editor-col">
+        <div class="editor-label"><span>CONVERTED OUTPUT</span><span id="outputCount">Ready when you are</span></div>
+        <textarea id="scriptOutput" placeholder="Your converted script will appear here..." readonly></textarea>
+        <div class="editor-foot"><span id="convertStatus">Your text is processed locally.</span><button class="text-btn" id="copyOutput">Copy output</button></div>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="primary" id="convertBtn">Convert script <span>→</span></button>
+      <button class="secondary" id="useOutput">Use output in Voice Studio</button>
+      <button class="secondary" id="downloadTxt">Download TXT</button>
+      <button class="secondary" id="downloadJson">Export project JSON</button>
+    </div>
+    <div class="notice" id="convertNotice" aria-live="polite">Character labels are detected from lines such as <code>आर्यन: नमस्ते</code> or <code>आर्यन — नमस्ते</code>. Review the detected speakers before playback.</div>
+  </section>
+
+  <section class="workspace" id="voicesPanel" hidden>
+    <div class="section-head">
+      <div><div class="kicker">02 / MULTI-CHARACTER PLAYBACK</div><h2>Voice cast</h2><p>Assign an installed browser voice to each character. The narrator reads lines without a speaker label.</p></div>
+      <span class="engine-tag"><span class="pulse"></span> Browser voice engine</span>
+    </div>
+    <div class="voice-toolbar">
+      <label>Playback language<select id="voiceLanguage"><option value="hi-IN">Hindi</option><option value="en-IN">English (India)</option><option value="en-US">English (US)</option><option value="bn-IN">Bengali</option><option value="mr-IN">Marathi</option><option value="ta-IN">Tamil</option><option value="te-IN">Telugu</option></select></label>
+      <label>Default speed <output id="speedValue">1.0×</output><input id="globalSpeed" type="range" min="0.6" max="1.5" value="1" step="0.1"></label>
+      <label>Default pitch <output id="pitchValue">1.0</output><input id="globalPitch" type="range" min="0.6" max="1.5" value="1" step="0.1"></label>
+    </div>
+    <div class="cast-heading"><div><b>Detected characters</b><small id="castSummary">No characters detected yet</small></div><button class="text-btn" id="refreshVoices">↻ Refresh voices</button></div>
+    <div id="characterList" class="character-list"><div class="empty-state">Add or convert a script first. Character voices will appear here.</div></div>
+    <div class="voice-preview-row">
+      <label class="voice-select">Narrator voice<select id="narratorVoice"><option value="">System default</option></select></label>
+      <button class="secondary" id="previewNarrator">▶ Preview narrator</button>
+    </div>
+    <div class="playback">
+      <div class="playback-top"><div><div class="kicker">PLAYBACK QUEUE</div><b id="nowPlaying">Ready to play</b><small id="queueProgress">0 dialogue lines</small></div><div class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+      <div class="player-controls">
+        <button class="primary" id="playBtn">▶ Play script</button><button class="secondary" id="pauseBtn" disabled>Ⅱ Pause</button><button class="secondary" id="stopBtn" disabled>■ Stop</button>
+      </div>
+      <div class="progress-track"><span id="progressBar"></span></div>
+      <div class="playback-note" id="playbackNote">Playback uses voices available in your browser or operating system. Voice selection and pronunciation vary by device.</div>
+    </div>
+  </section>
+
+  <section class="below">
+    <div><span class="kicker">HOW IT WORKS</span><h2>From written dialogue to spoken scenes</h2></div>
+    <div class="steps"><div><b>01</b><strong>Paste your script</strong><p>Use plain text or upload a TXT file from your device.</p></div><div><b>02</b><strong>Convert &amp; organise</strong><p>Choose a format and review character labels detected in your script.</p></div><div><b>03</b><strong>Assign voices</strong><p>Choose from voices your browser actually provides, then play the scene.</p></div></div>
+  </section>
+  <footer><span>DoKitly · Story &amp; Voice Studio · Build 46 Test</span><span>Processed privately in your browser.</span></footer>
+</main>
+<script src="../assets/story-voice-studio.js"></script>
+</body></html>
